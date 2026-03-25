@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 from datetime import datetime, timezone
 from typing import Any
 
@@ -38,8 +40,8 @@ class UserBase(BaseModel):
 
     @field_validator("email")
     @classmethod
-    def normalize_email(cls, value: EmailStr) -> EmailStr:
-        return EmailStr(value.strip().lower())
+    def normalize_email(cls, value: EmailStr) -> str:
+        return str(value).strip().lower()
 
 
 class UserCreate(UserBase):
@@ -52,8 +54,8 @@ class UserLogin(BaseModel):
 
     @field_validator("email")
     @classmethod
-    def normalize_email(cls, value: EmailStr) -> EmailStr:
-        return EmailStr(value.strip().lower())
+    def normalize_email(cls, value: EmailStr) -> str:
+        return str(value).strip().lower()
 
 
 class UserInDB(UserBase):
@@ -69,6 +71,47 @@ class UserInDB(UserBase):
 class UserResponse(UserBase):
     id: PyObjectId
     is_active: bool
+    created_at: datetime
+    updated_at: datetime
+
+    model_config = ConfigDict(from_attributes=True)
+
+
+class CloudAccountBase(BaseModel):
+    provider: str = Field(default="aws", min_length=2, max_length=30)
+    account_id: str = Field(min_length=3, max_length=64)
+    account_name: str = Field(min_length=2, max_length=100)
+
+    @field_validator("provider")
+    @classmethod
+    def normalize_provider(cls, value: str) -> str:
+        return value.strip().lower()
+
+    @field_validator("account_id", "account_name")
+    @classmethod
+    def normalize_text(cls, value: str) -> str:
+        cleaned = value.strip()
+        if not cleaned:
+            raise ValueError("Value cannot be empty")
+        return cleaned
+
+
+class CloudAccountCreate(CloudAccountBase):
+    user_id: PyObjectId
+
+
+class CloudAccountInDB(CloudAccountBase):
+    id: PyObjectId = Field(alias="_id")
+    user_id: PyObjectId
+    created_at: datetime
+    updated_at: datetime
+
+    model_config = ConfigDict(populate_by_name=True)
+
+
+class CloudAccountResponse(CloudAccountBase):
+    id: PyObjectId
+    user_id: PyObjectId
     created_at: datetime
     updated_at: datetime
 
@@ -97,12 +140,41 @@ def build_user_document(name: str, email: str, hashed_password: str) -> dict[str
     }
 
 
+def build_cloud_account_document(
+    user_id: str,
+    provider: str,
+    account_id: str,
+    account_name: str,
+) -> dict[str, Any]:
+    now = datetime.now(timezone.utc)
+    return {
+        "user_id": ObjectId(user_id),
+        "provider": provider,
+        "account_id": account_id,
+        "account_name": account_name,
+        "created_at": now,
+        "updated_at": now,
+    }
+
+
 def serialize_user(document: dict[str, Any]) -> UserResponse:
     return UserResponse(
         id=str(document["_id"]),
         name=document["name"],
         email=document["email"],
         is_active=document["is_active"],
+        created_at=document["created_at"],
+        updated_at=document["updated_at"],
+    )
+
+
+def serialize_cloud_account(document: dict[str, Any]) -> CloudAccountResponse:
+    return CloudAccountResponse(
+        id=str(document["_id"]),
+        user_id=str(document["user_id"]),
+        provider=document["provider"],
+        account_id=document["account_id"],
+        account_name=document["account_name"],
         created_at=document["created_at"],
         updated_at=document["updated_at"],
     )

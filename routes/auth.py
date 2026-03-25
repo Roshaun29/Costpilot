@@ -6,7 +6,7 @@ from fastapi.security import OAuth2PasswordBearer
 from jose import JWTError
 from pymongo.errors import DuplicateKeyError
 
-from database import get_database
+from db.connection import get_users_collection
 from models.user import (
     RefreshTokenRequest,
     TokenPair,
@@ -39,8 +39,8 @@ async def get_current_user(token: str = Depends(oauth2_scheme)) -> dict:
     except JWTError as exc:
         raise credentials_exception from exc
 
-    db = get_database()
-    user = await db.users.find_one({"_id": ObjectId(subject), "is_active": True})
+    users_collection = get_users_collection()
+    user = await users_collection.find_one({"_id": ObjectId(subject), "is_active": True})
     if not user:
         raise credentials_exception
     return user
@@ -48,7 +48,7 @@ async def get_current_user(token: str = Depends(oauth2_scheme)) -> dict:
 
 @router.post("/register", response_model=UserResponse, status_code=status.HTTP_201_CREATED)
 async def register_user(payload: UserCreate) -> UserResponse:
-    db = get_database()
+    users_collection = get_users_collection()
     user_document = build_user_document(
         name=payload.name,
         email=str(payload.email),
@@ -56,21 +56,21 @@ async def register_user(payload: UserCreate) -> UserResponse:
     )
 
     try:
-        result = await db.users.insert_one(user_document)
+        result = await users_collection.insert_one(user_document)
     except DuplicateKeyError as exc:
         raise HTTPException(
             status_code=status.HTTP_409_CONFLICT,
             detail="An account with this email already exists",
         ) from exc
 
-    created_user = await db.users.find_one({"_id": result.inserted_id})
+    created_user = await users_collection.find_one({"_id": result.inserted_id})
     return serialize_user(created_user)
 
 
 @router.post("/login", response_model=TokenPair)
 async def login_user(payload: UserLogin) -> TokenPair:
-    db = get_database()
-    user = await db.users.find_one({"email": str(payload.email)})
+    users_collection = get_users_collection()
+    user = await users_collection.find_one({"email": str(payload.email)})
 
     if not user or not verify_password(payload.password, user["hashed_password"]):
         raise HTTPException(
@@ -107,13 +107,13 @@ async def refresh_access_token(payload: RefreshTokenRequest) -> TokenPair:
     except JWTError as exc:
         raise credentials_exception from exc
 
-    db = get_database()
-    user = await db.users.find_one({"_id": ObjectId(subject), "is_active": True})
+    users_collection = get_users_collection()
+    user = await users_collection.find_one({"_id": ObjectId(subject), "is_active": True})
     if not user:
         raise credentials_exception
 
     user["updated_at"] = datetime.now(timezone.utc)
-    await db.users.update_one(
+    await users_collection.update_one(
         {"_id": user["_id"]},
         {"$set": {"updated_at": user["updated_at"]}},
     )

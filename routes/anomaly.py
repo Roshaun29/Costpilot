@@ -5,6 +5,8 @@ from typing import Any
 from fastapi import APIRouter, Depends, HTTPException, status
 
 from config import Settings, get_settings
+from db.connection import get_anomaly_results_collection
+from models.anomaly import build_anomaly_result_document
 from routes.auth import get_current_user
 from routes.cloud import get_aws_service
 from services.anomaly_detector import (
@@ -59,7 +61,7 @@ def _serialize_anomalies(records: list[dict[str, Any]]) -> list[dict[str, Any]]:
 
 @router.post("/detect")
 async def detect_cost_anomalies(
-    _current_user: dict = Depends(get_current_user),
+    current_user: dict = Depends(get_current_user),
     aws_service: AwsCostService = Depends(get_aws_service),
     data_processor: CloudCostDataProcessor = Depends(get_anomaly_data_processor),
     anomaly_detector: CloudCostAnomalyDetector = Depends(get_anomaly_detector),
@@ -91,6 +93,23 @@ async def detect_cost_anomalies(
 
     records = _serialize_anomalies(anomaly_df.to_dict(orient="records"))
     anomalies = [record for record in records if record["is_anomaly"]]
+
+    if anomalies:
+        anomaly_results_collection = get_anomaly_results_collection()
+        documents = [
+            build_anomaly_result_document(
+                user_id=str(current_user["_id"]),
+                date=anomaly_df.iloc[index]["date"].to_pydatetime(),
+                service=record["service"],
+                cost=record["cost"],
+                anomaly_score=record["anomaly_score"],
+                is_anomaly=record["is_anomaly"],
+                explanation=record["explanation"],
+            )
+            for index, record in enumerate(records)
+            if record["is_anomaly"]
+        ]
+        await anomaly_results_collection.insert_many(documents)
 
     return {
         "message": "Anomaly detection completed successfully",

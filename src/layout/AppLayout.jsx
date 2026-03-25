@@ -3,7 +3,11 @@ import { Outlet } from 'react-router-dom';
 
 import { Sidebar } from '../components/Sidebar';
 import { Topbar } from '../components/Topbar';
-import { navItems } from '../services/mockData';
+
+const navItems = [
+  { label: 'Dashboard', path: '/dashboard' },
+  { label: 'Anomalies', path: '/anomalies' },
+];
 
 export function AppLayout({ user }) {
   const [sidebarOpen, setSidebarOpen] = useState(false);

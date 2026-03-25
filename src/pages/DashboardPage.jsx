@@ -10,19 +10,28 @@ import { fetchDashboardData, syncCloudData } from '../services/api';
 export function DashboardPage() {
   const [dashboard, setDashboard] = useState({ metrics: [], chart: [], anomalies: [] });
   const [syncing, setSyncing] = useState(false);
-  const [syncLabel, setSyncLabel] = useState('Last sync 14 minutes ago');
+  const [syncLabel, setSyncLabel] = useState('Ready to sync live backend data');
 
   useEffect(() => {
-    fetchDashboardData().then((data) => {
-      startTransition(() => setDashboard(data));
-    });
+    fetchDashboardData()
+      .then((data) => {
+        startTransition(() => setDashboard(data));
+      })
+      .catch(() => {
+        setSyncLabel('Unable to load dashboard data');
+      });
   }, []);
 
   const handleSync = async () => {
     setSyncing(true);
-    const response = await syncCloudData();
-    setSyncLabel(`${response.lastSyncedAt} - ${response.syncedServices} services refreshed`);
-    setSyncing(false);
+    try {
+      const response = await syncCloudData();
+      setSyncLabel(`${response.lastSyncedAt} - ${response.syncedServices} services refreshed`);
+    } catch {
+      setSyncLabel('Sync failed');
+    } finally {
+      setSyncing(false);
+    }
   };
 
   return (

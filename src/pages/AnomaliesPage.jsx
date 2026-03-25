@@ -2,8 +2,22 @@ import { useEffect, useState, startTransition } from 'react';
 
 import { AnomaliesTable } from '../components/AnomaliesTable';
 import { GlassCard } from '../components/GlassCard';
-import { anomalyInsights } from '../services/mockData';
 import { fetchAnomalies } from '../services/api';
+
+const anomalyInsights = [
+  {
+    title: 'Compute drift detected',
+    body: 'EC2 workloads in production-east are sustaining an abnormal usage envelope.',
+  },
+  {
+    title: 'Database cost baseline shifted',
+    body: 'RDS storage and I/O climbed faster than the weekly forecast window.',
+  },
+  {
+    title: 'Storage expansion under watch',
+    body: 'S3 growth is still moderate, but it crossed the normal variance threshold.',
+  },
+];
 
 export function AnomaliesPage() {
   const [rows, setRows] = useState([]);

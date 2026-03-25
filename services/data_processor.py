@@ -13,7 +13,7 @@ class DataProcessingError(Exception):
     """Raised when raw cloud cost data cannot be processed."""
 
 
-@dataclass(slots=True)
+@dataclass
 class CloudCostDataProcessor:
     normalize_cost: bool = True
 

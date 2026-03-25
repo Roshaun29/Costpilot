@@ -4,7 +4,7 @@ from dataclasses import dataclass, field
 from typing import Any, Callable, Protocol
 
 from config import Settings, get_settings
-from services.aws_service import AwsCostService, get_aws_cost_service
+from services.aws_service import AwsCostService
 
 
 NormalizedCostRecord = dict[str, Any]
@@ -30,10 +30,10 @@ class CloudProviderAdapter(Protocol):
         """Fetch and normalize provider cost data."""
 
 
-@dataclass(slots=True)
+@dataclass
 class AwsCloudAdapter:
     aws_service: AwsCostService
-    provider_name: str = 'aws'
+    provider_name: str = "aws"
 
     def fetch_last_30_days_cost(self) -> list[NormalizedCostRecord]:
         records = self.aws_service.fetch_last_30_days_cost()
@@ -41,58 +41,76 @@ class AwsCloudAdapter:
 
     def _normalize_record(self, record: dict[str, Any]) -> NormalizedCostRecord:
         return {
-            'date': record['date'],
-            'service': str(record['service']).strip(),
-            'cost': float(record['cost']),
-            'provider': self.provider_name,
+            "date": record["date"],
+            "service": str(record["service"]).strip(),
+            "cost": float(record["cost"]),
+            "provider": self.provider_name,
         }
 
 
-@dataclass(slots=True)
+@dataclass
 class AzureCloudAdapter:
     fetcher: ProviderFetcher | None = None
-    provider_name: str = 'azure'
+    provider_name: str = "azure"
 
     def fetch_last_30_days_cost(self) -> list[NormalizedCostRecord]:
         if self.fetcher is None:
             raise ProviderNotConfiguredError(
-                'Azure provider is registered but no fetcher/client is configured.'
+                "Azure provider is registered but no fetcher/client is configured."
             )
 
         return [self._normalize_record(record) for record in self.fetcher()]
 
     def _normalize_record(self, record: dict[str, Any]) -> NormalizedCostRecord:
         return {
-            'date': record.get('date') or record.get('usage_date'),
-            'service': str(record.get('service') or record.get('meterCategory') or record.get('resource_type', '')).strip(),
-            'cost': float(record.get('cost') or record.get('amount') or record.get('pretaxCost') or 0),
-            'provider': self.provider_name,
+            "date": record.get("date") or record.get("usage_date"),
+            "service": str(
+                record.get("service")
+                or record.get("meterCategory")
+                or record.get("resource_type", "")
+            ).strip(),
+            "cost": float(
+                record.get("cost")
+                or record.get("amount")
+                or record.get("pretaxCost")
+                or 0
+            ),
+            "provider": self.provider_name,
         }
 
 
-@dataclass(slots=True)
+@dataclass
 class GcpCloudAdapter:
     fetcher: ProviderFetcher | None = None
-    provider_name: str = 'gcp'
+    provider_name: str = "gcp"
 
     def fetch_last_30_days_cost(self) -> list[NormalizedCostRecord]:
         if self.fetcher is None:
             raise ProviderNotConfiguredError(
-                'GCP provider is registered but no fetcher/client is configured.'
+                "GCP provider is registered but no fetcher/client is configured."
             )
 
         return [self._normalize_record(record) for record in self.fetcher()]
 
     def _normalize_record(self, record: dict[str, Any]) -> NormalizedCostRecord:
         return {
-            'date': record.get('date') or record.get('usage_date') or record.get('invoice_date'),
-            'service': str(record.get('service') or record.get('service_description') or record.get('sku_description', '')).strip(),
-            'cost': float(record.get('cost') or record.get('amount') or record.get('cost_amount') or 0),
-            'provider': self.provider_name,
+            "date": record.get("date") or record.get("usage_date") or record.get("invoice_date"),
+            "service": str(
+                record.get("service")
+                or record.get("service_description")
+                or record.get("sku_description", "")
+            ).strip(),
+            "cost": float(
+                record.get("cost")
+                or record.get("amount")
+                or record.get("cost_amount")
+                or 0
+            ),
+            "provider": self.provider_name,
         }
 
 
-@dataclass(slots=True)
+@dataclass
 class CloudAdapterService:
     adapters: dict[str, CloudProviderAdapter] = field(default_factory=dict)
 
@@ -102,7 +120,7 @@ class CloudAdapterService:
     def get_provider(self, provider: str) -> CloudProviderAdapter:
         adapter = self.adapters.get(provider.lower())
         if adapter is None:
-            raise ProviderNotSupportedError(f'Unsupported cloud provider: {provider}')
+            raise ProviderNotSupportedError(f"Unsupported cloud provider: {provider}")
         return adapter
 
     def fetch_provider_costs(self, provider: str) -> list[NormalizedCostRecord]:
@@ -124,6 +142,8 @@ def build_default_cloud_adapter_service(
     azure_fetcher: ProviderFetcher | None = None,
     gcp_fetcher: ProviderFetcher | None = None,
 ) -> CloudAdapterService:
+    from services.aws_service import get_aws_cost_service
+
     service = CloudAdapterService()
     service.register_provider(
         AwsCloudAdapter(aws_service=get_aws_cost_service(region_name=settings.aws_region))

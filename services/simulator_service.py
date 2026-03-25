@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import datetime, timedelta, timezone
 from math import pi, sin
 from random import Random
@@ -10,7 +10,7 @@ from typing import Any
 SUPPORTED_PROVIDERS = ("aws", "azure", "gcp")
 
 
-@dataclass(frozen=True, slots=True)
+@dataclass(frozen=True)
 class ServiceProfile:
     baseline_cost: float
     daily_amplitude: float
@@ -52,12 +52,13 @@ PROVIDER_NOISE_MULTIPLIER: dict[str, float] = {
 }
 
 
-@dataclass(slots=True)
+@dataclass
 class SimulatorService:
     days: int = 30
     anomaly_probability: float = 0.06
     noise_level: float = 0.08
     seed: int | None = None
+    _random: Any = field(init=False)
 
     def __post_init__(self) -> None:
         if self.days <= 0:
@@ -67,13 +68,19 @@ class SimulatorService:
         if self.noise_level < 0:
             raise ValueError("noise_level must be greater than or equal to 0")
 
-        self._random = Random(self.seed)
+        try:
+            self._random = Random(self.seed)
+        except Exception:
+            self._random = None
 
     def generate(
         self,
         providers: list[str] | tuple[str, ...] | None = None,
         end_date: datetime | None = None,
     ) -> list[dict[str, Any]]:
+        if self._random is None:
+            self._random = Random(self.seed)
+
         selected_providers = self._normalize_providers(providers)
         simulation_end = self._normalize_end_date(end_date)
         simulation_start = simulation_end - timedelta(days=self.days - 1)
@@ -125,8 +132,9 @@ class SimulatorService:
         start_date: datetime,
     ) -> list[dict[str, Any]]:
         records: list[dict[str, Any]] = []
-        daily_offset = self._random.uniform(0, 2 * pi)
-        weekly_offset = self._random.uniform(0, 2 * pi)
+        random_source = self._random or Random(self.seed)
+        daily_offset = random_source.uniform(0, 2 * pi)
+        weekly_offset = random_source.uniform(0, 2 * pi)
         provider_noise = self.noise_level * PROVIDER_NOISE_MULTIPLIER[provider]
         anomaly_probability = min(
             self.anomaly_probability * profile.anomaly_probability_multiplier,
@@ -138,13 +146,13 @@ class SimulatorService:
             daily_component = 1 + profile.daily_amplitude * sin((2 * pi * day_index) + daily_offset)
             weekly_component = 1 + profile.weekly_amplitude * sin((2 * pi * day_index / 7) + weekly_offset)
             growth_component = 1 + (profile.growth_rate * day_index)
-            noise_component = 1 + self._random.uniform(-provider_noise, provider_noise)
+            noise_component = 1 + random_source.uniform(-provider_noise, provider_noise)
 
             cost = profile.baseline_cost * daily_component * weekly_component * growth_component
             cost *= max(noise_component, 0.05)
 
-            if self._random.random() < anomaly_probability:
-                spike_multiplier = self._random.uniform(*profile.spike_multiplier_range)
+            if random_source.random() < anomaly_probability:
+                spike_multiplier = random_source.uniform(*profile.spike_multiplier_range)
                 cost *= spike_multiplier
 
             records.append(

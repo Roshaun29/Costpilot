@@ -8,7 +8,6 @@ from config import Settings, get_settings
 from db.connection import get_anomaly_results_collection
 from models.anomaly import build_anomaly_result_document
 from routes.auth import get_current_user
-from routes.cloud import SIMULATED_PROVIDER_MAP, get_aws_service
 from services.anomaly_detector import (
     AnomalyDetectionError,
     CloudCostAnomalyDetector,
@@ -24,6 +23,19 @@ from services.simulator_service import SimulatorService
 
 
 router = APIRouter(prefix="/anomaly", tags=["Anomaly Detection"])
+
+SIMULATED_PROVIDER_MAP = {
+    "simulated": "aws",
+    "aws_simulated": "aws",
+    "azure_simulated": "azure",
+    "gcp_simulated": "gcp",
+}
+
+
+def get_aws_service(settings: Settings = Depends(get_settings)) -> AwsCostService:
+    from services.aws_service import get_aws_cost_service
+
+    return get_aws_cost_service(region_name=settings.aws_region)
 
 
 def get_anomaly_detector(
@@ -73,9 +85,10 @@ async def detect_cost_anomalies(
     simulator_service: SimulatorService = Depends(get_simulator_service),
     provider: str = "aws",
 ) -> dict[str, Any]:
+    provider_key = provider.strip().lower()
+    simulated_provider = SIMULATED_PROVIDER_MAP.get(provider_key)
+
     try:
-        provider_key = provider.strip().lower()
-        simulated_provider = SIMULATED_PROVIDER_MAP.get(provider_key)
         if simulated_provider:
             raw_costs = simulator_service.generate(providers=[simulated_provider])
         else:
@@ -103,30 +116,36 @@ async def detect_cost_anomalies(
             detail="Unexpected error while detecting anomalies",
         ) from exc
 
-    records = _serialize_anomalies(anomaly_df.to_dict(orient="records"))
-    anomalies = [record for record in records if record["is_anomaly"]]
+    anomaly_rows = [
+        row for row in anomaly_df.to_dict(orient="records") if bool(row.get("is_anomaly"))
+    ]
 
-    if anomalies:
+    if anomaly_rows:
         anomaly_results_collection = get_anomaly_results_collection()
+        provider_name = (
+            provider_key if provider_key in {"aws", "azure", "gcp"} else (simulated_provider or "aws")
+        )
         documents = [
             build_anomaly_result_document(
                 user_id=str(current_user["_id"]),
-                date=anomaly_df.iloc[index]["date"].to_pydatetime(),
-                service=record["service"],
-                cost=record["cost"],
-                anomaly_score=record["anomaly_score"],
-                is_anomaly=record["is_anomaly"],
-                explanation=record["explanation"],
-                provider=provider_key if provider_key in {"aws", "azure", "gcp"} else (simulated_provider or "aws"),
+                date=row["date"].to_pydatetime()
+                if hasattr(row["date"], "to_pydatetime")
+                else row["date"],
+                service=str(row["service"]),
+                cost=float(row["cost"]),
+                anomaly_score=float(row["anomaly_score"]),
+                is_anomaly=bool(row["is_anomaly"]),
+                explanation=str(row["explanation"]),
+                provider=provider_name,
             )
-            for index, record in enumerate(records)
-            if record["is_anomaly"]
+            for row in anomaly_rows
         ]
         await anomaly_results_collection.insert_many(documents)
 
+    anomalies = _serialize_anomalies(anomaly_rows)
     return {
         "message": "Anomaly detection completed successfully",
-        "count": len(records),
+        "count": len(anomaly_df.index),
         "anomaly_count": len(anomalies),
         "data": anomalies,
     }

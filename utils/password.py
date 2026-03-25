@@ -1,19 +1,19 @@
-from passlib.context import CryptContext
-
-from config import get_settings
+import bcrypt
 
 
-settings = get_settings()
-pwd_context = CryptContext(
-    schemes=["bcrypt"],
-    deprecated="auto",
-    bcrypt__rounds=settings.bcrypt_rounds,
-)
+def _normalize_password(password: str) -> bytes:
+    encoded = password.encode("utf-8")
+    if len(encoded) <= 72:
+        return encoded
+    return encoded[:72]
 
 
 def get_password_hash(password: str) -> str:
-    return pwd_context.hash(password)
+    normalized = _normalize_password(password)
+    hashed = bcrypt.hashpw(normalized, bcrypt.gensalt())
+    return hashed.decode("utf-8")
 
 
 def verify_password(plain_password: str, hashed_password: str) -> bool:
-    return pwd_context.verify(plain_password, hashed_password)
+    normalized = _normalize_password(plain_password)
+    return bcrypt.checkpw(normalized, hashed_password.encode("utf-8"))

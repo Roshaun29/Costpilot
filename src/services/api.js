@@ -1,6 +1,6 @@
 import axios from 'axios';
 
-const API_BASE_URL = 'http://localhost:8000';
+const API_BASE_URL = '';
 const ACCESS_TOKEN_KEY = 'auth_access_token';
 const REFRESH_TOKEN_KEY = 'auth_refresh_token';
 const USER_KEY = 'auth_user';
@@ -160,7 +160,14 @@ export async function login(credentials) {
 }
 
 export async function register(payload) {
-  await apiClient.post('/auth/register', payload);
+  try {
+    await apiClient.post('/auth/register', payload);
+  } catch (error) {
+    if (error.response?.status !== 409) {
+      throw error;
+    }
+  }
+
   return login({ email: payload.email, password: payload.password });
 }
 

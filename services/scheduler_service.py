@@ -19,7 +19,7 @@ from services.data_processor import CloudCostDataProcessor
 from services.simulator_service import SimulatorService
 
 
-@dataclass(slots=True)
+@dataclass
 class SchedulerService:
     settings: Settings
     aws_service: AwsCostService

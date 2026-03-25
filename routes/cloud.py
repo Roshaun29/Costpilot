@@ -10,12 +10,7 @@ from config import Settings, get_settings
 from db.connection import get_cost_data_collection
 from models.cost_data import build_cost_data_document, serialize_cost_data
 from routes.auth import get_current_user
-from services.aws_service import (
-    AwsCostExplorerError,
-    AwsCredentialsError,
-    AwsCostService,
-    get_aws_cost_service,
-)
+from services.aws_service import AwsCostExplorerError, AwsCredentialsError, AwsCostService
 from services.data_processor import (
     CloudCostDataProcessor,
     DataProcessingError,
@@ -37,6 +32,8 @@ SIMULATED_PROVIDER_MAP = {
 
 
 def get_aws_service(settings: Settings = Depends(get_settings)) -> AwsCostService:
+    from services.aws_service import get_aws_cost_service
+
     return get_aws_cost_service(region_name=settings.aws_region)
 
 

@@ -14,7 +14,7 @@ class AnomalyDetectionError(Exception):
     """Raised when anomaly detection cannot be performed."""
 
 
-@dataclass(slots=True)
+@dataclass
 class CloudCostAnomalyDetector:
     contamination: float = 0.1
     zscore_threshold: float = 2.5

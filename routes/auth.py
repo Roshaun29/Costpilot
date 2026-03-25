@@ -49,21 +49,39 @@ async def get_current_user(token: str = Depends(oauth2_scheme)) -> dict:
 @router.post("/register", response_model=UserResponse, status_code=status.HTTP_201_CREATED)
 async def register_user(payload: UserCreate) -> UserResponse:
     users_collection = get_users_collection()
-    user_document = build_user_document(
-        name=payload.name,
-        email=str(payload.email),
-        hashed_password=get_password_hash(payload.password),
-    )
+
+    existing_user = await users_collection.find_one({"email": str(payload.email)})
+    if existing_user:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="An account with this email already exists",
+        )
 
     try:
+        user_document = build_user_document(
+            name=payload.name,
+            email=str(payload.email),
+            hashed_password=get_password_hash(payload.password),
+        )
         result = await users_collection.insert_one(user_document)
     except DuplicateKeyError as exc:
         raise HTTPException(
             status_code=status.HTTP_409_CONFLICT,
             detail="An account with this email already exists",
         ) from exc
+    except Exception as exc:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Unable to create user account: {exc}",
+        ) from exc
 
     created_user = await users_collection.find_one({"_id": result.inserted_id})
+    if not created_user:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="User account was created but could not be loaded",
+        )
+
     return serialize_user(created_user)
 
 

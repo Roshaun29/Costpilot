@@ -1,11 +1,16 @@
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import date, timedelta
 from typing import Any
 
 import boto3
-from botocore.exceptions import BotoCoreError, ClientError, NoCredentialsError, PartialCredentialsError
+from botocore.exceptions import (
+    BotoCoreError,
+    ClientError,
+    NoCredentialsError,
+    PartialCredentialsError,
+)
 
 
 class AwsCostServiceError(Exception):
@@ -20,16 +25,23 @@ class AwsCostExplorerError(AwsCostServiceError):
     """Raised when the Cost Explorer API returns an error."""
 
 
-@dataclass(slots=True)
+@dataclass
 class AwsCostService:
     region_name: str = "us-east-1"
     metric: str = "UnblendedCost"
+    _client: Any = field(init=False)
 
     def __post_init__(self) -> None:
         # Cost Explorer is a global service, but boto3 still expects a region.
-        self._client = boto3.client("ce", region_name=self.region_name)
+        try:
+            self._client = boto3.client("ce", region_name=self.region_name)
+        except Exception:
+            self._client = None
 
     def fetch_last_30_days_cost(self) -> list[dict[str, Any]]:
+        if not self._client:
+            raise AwsCredentialsError("AWS client not initialized")
+
         end_date = date.today()
         start_date = end_date - timedelta(days=30)
 
@@ -70,11 +82,7 @@ class AwsCostService:
 
             for group in groups:
                 keys = group.get("Keys", [])
-                amount = (
-                    group.get("Metrics", {})
-                    .get(self.metric, {})
-                    .get("Amount")
-                )
+                amount = group.get("Metrics", {}).get(self.metric, {}).get("Amount")
 
                 if not keys or amount is None:
                     continue

@@ -17,6 +17,7 @@ from services.data_processor import (
     DataProcessingError,
     get_cloud_cost_data_processor,
 )
+from services.simulator_service import SimulatorService
 
 
 router = APIRouter(prefix="/cloud", tags=["Cloud"])
@@ -28,6 +29,10 @@ def get_aws_service(settings: Settings = Depends(get_settings)) -> AwsCostServic
 
 def get_data_processor() -> CloudCostDataProcessor:
     return get_cloud_cost_data_processor(normalize_cost=True)
+
+
+def get_simulator_service() -> SimulatorService:
+    return SimulatorService()
 
 
 def _serialize_records(records: list[dict[str, Any]]) -> list[dict[str, Any]]:
@@ -52,9 +57,14 @@ async def sync_cloud_costs(
     _current_user: dict = Depends(get_current_user),
     aws_service: AwsCostService = Depends(get_aws_service),
     data_processor: CloudCostDataProcessor = Depends(get_data_processor),
+    simulator_service: SimulatorService = Depends(get_simulator_service),
+    provider: str = "aws",
 ) -> dict[str, Any]:
     try:
-        raw_costs = aws_service.fetch_last_30_days_cost()
+        if provider.strip().lower() == "simulated":
+            raw_costs = simulator_service.generate(providers=["aws"])
+        else:
+            raw_costs = aws_service.fetch_last_30_days_cost()
         processed_df = data_processor.process(raw_costs)
     except AwsCredentialsError as exc:
         raise HTTPException(

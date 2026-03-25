@@ -20,6 +20,7 @@ from services.data_processor import (
     DataProcessingError,
     get_cloud_cost_data_processor,
 )
+from services.simulator_service import SimulatorService
 
 
 router = APIRouter(prefix="/anomaly", tags=["Anomaly Detection"])
@@ -37,6 +38,10 @@ def get_anomaly_detector(
 
 def get_anomaly_data_processor() -> CloudCostDataProcessor:
     return get_cloud_cost_data_processor(normalize_cost=False)
+
+
+def get_simulator_service() -> SimulatorService:
+    return SimulatorService()
 
 
 def _serialize_anomalies(records: list[dict[str, Any]]) -> list[dict[str, Any]]:
@@ -65,9 +70,14 @@ async def detect_cost_anomalies(
     aws_service: AwsCostService = Depends(get_aws_service),
     data_processor: CloudCostDataProcessor = Depends(get_anomaly_data_processor),
     anomaly_detector: CloudCostAnomalyDetector = Depends(get_anomaly_detector),
+    simulator_service: SimulatorService = Depends(get_simulator_service),
+    provider: str = "aws",
 ) -> dict[str, Any]:
     try:
-        raw_costs = aws_service.fetch_last_30_days_cost()
+        if provider.strip().lower() == "simulated":
+            raw_costs = simulator_service.generate(providers=["aws"])
+        else:
+            raw_costs = aws_service.fetch_last_30_days_cost()
         processed_df = data_processor.process(raw_costs)
         anomaly_df = anomaly_detector.detect(processed_df)
     except AwsCredentialsError as exc:

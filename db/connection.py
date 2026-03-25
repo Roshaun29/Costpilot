@@ -30,5 +30,9 @@ def get_anomaly_results_collection() -> AsyncIOMotorCollection:
     return _database.get_collection("anomaly_results")
 
 
+def get_cost_data_collection() -> AsyncIOMotorCollection:
+    return _database.get_collection("cost_data")
+
+
 async def ping_database() -> None:
     await _database.command("ping")

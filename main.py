@@ -6,15 +6,25 @@ from config import get_settings
 from db.connection import (
     get_anomaly_results_collection,
     get_cloud_accounts_collection,
+    get_cost_data_collection,
     get_users_collection,
     ping_database,
 )
-from routes.anomaly import router as anomaly_router
+from routes.anomaly import get_anomaly_data_processor, get_anomaly_detector, router as anomaly_router
 from routes.auth import router as auth_router
-from routes.cloud import router as cloud_router
+from routes.cloud import get_aws_service, router as cloud_router
+from services.scheduler_service import SchedulerService
+from services.simulator_service import SimulatorService
 
 
 settings = get_settings()
+scheduler_service = SchedulerService(
+    settings=settings,
+    aws_service=get_aws_service(settings),
+    data_processor=get_anomaly_data_processor(),
+    anomaly_detector=get_anomaly_detector(settings),
+    simulator_service=SimulatorService(),
+)
 
 
 @asynccontextmanager
@@ -23,6 +33,7 @@ async def lifespan(app: FastAPI):
     users_collection = get_users_collection()
     cloud_accounts_collection = get_cloud_accounts_collection()
     anomaly_results_collection = get_anomaly_results_collection()
+    cost_data_collection = get_cost_data_collection()
 
     await users_collection.create_index("email", unique=True)
     await cloud_accounts_collection.create_index(
@@ -31,7 +42,14 @@ async def lifespan(app: FastAPI):
     )
     await anomaly_results_collection.create_index([("user_id", 1), ("date", -1)])
     await anomaly_results_collection.create_index([("service", 1), ("is_anomaly", 1)])
-    yield
+    await cost_data_collection.create_index([("user_id", 1), ("date", -1)])
+    await cost_data_collection.create_index([("provider", 1), ("service", 1)])
+
+    scheduler_service.start()
+    try:
+        yield
+    finally:
+        await scheduler_service.shutdown()
 
 
 app = FastAPI(

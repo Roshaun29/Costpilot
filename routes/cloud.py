@@ -7,7 +7,7 @@ from bson import ObjectId
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 
 from config import Settings, get_settings
-from db.connection import get_cost_data_collection
+from db.connection import get_cloud_accounts_collection, get_cost_data_collection
 from models.cost_data import build_cost_data_document, serialize_cost_data
 from routes.auth import get_current_user
 from services.aws_service import AwsCostExplorerError, AwsCredentialsError, AwsCostService
@@ -77,6 +77,50 @@ def _serialize_history_records(records: list[dict[str, Any]]) -> list[dict[str, 
             }
         )
     return serialized
+
+
+@cloud_router.post("/add-account", status_code=status.HTTP_201_CREATED)
+async def add_cloud_account(
+    payload: dict[str, Any],
+    current_user: dict = Depends(get_current_user),
+) -> dict[str, Any]:
+    provider = str(payload.get("provider", "")).strip().lower()
+    account_name = str(payload.get("account_name", "")).strip()
+
+    if provider not in {"aws", "azure", "gcp"}:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail="Provider must be one of: aws, azure, gcp",
+        )
+
+    if not account_name:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail="Account name is required",
+        )
+
+    cloud_accounts_collection = get_cloud_accounts_collection()
+    created_at = datetime.now(timezone.utc)
+    document = {
+        "user_id": ObjectId(str(current_user["_id"])),
+        "provider": provider,
+        "account_name": account_name,
+        "status": "connected",
+        "created_at": created_at,
+    }
+
+    result = await cloud_accounts_collection.insert_one(document)
+
+    return {
+        "message": "Cloud account added successfully",
+        "data": {
+            "id": str(result.inserted_id),
+            "provider": provider,
+            "account_name": account_name,
+            "status": "connected",
+            "created_at": created_at.isoformat(),
+        },
+    }
 
 
 @cloud_router.get("/sync")

@@ -3,14 +3,31 @@ import { useEffect, useState, startTransition } from 'react';
 import { AnomaliesTable } from '../components/AnomaliesTable';
 import { CostChart } from '../components/CostChart';
 import { GlassCard } from '../components/GlassCard';
+import { InputField } from '../components/InputField';
 import { StatCard } from '../components/StatCard';
 import { SyncButton } from '../components/SyncButton';
-import { fetchDashboardData, syncCloudData } from '../services/api';
+import { addCloudAccount, fetchDashboardData, syncCloudData } from '../services/api';
+
+const CONNECTION_STEPS = [
+  'Validating credentials...',
+  'Connecting...',
+  'Fetching billing data...',
+];
+
+const wait = (duration) => new Promise((resolve) => {
+  window.setTimeout(resolve, duration);
+});
 
 export function DashboardPage() {
   const [dashboard, setDashboard] = useState({ metrics: [], chart: [], anomalies: [] });
   const [syncing, setSyncing] = useState(false);
   const [syncLabel, setSyncLabel] = useState('Ready to sync live backend data');
+  const [isAddAccountOpen, setIsAddAccountOpen] = useState(false);
+  const [accountForm, setAccountForm] = useState({ provider: 'aws', account_name: '' });
+  const [isSavingAccount, setIsSavingAccount] = useState(false);
+  const [accountMessage, setAccountMessage] = useState('');
+  const [connectionStep, setConnectionStep] = useState('');
+  const [connectedAccounts, setConnectedAccounts] = useState([]);
 
   useEffect(() => {
     fetchDashboardData()
@@ -34,6 +51,31 @@ export function DashboardPage() {
     }
   };
 
+  const handleAddAccount = async (event) => {
+    event.preventDefault();
+    setIsSavingAccount(true);
+    setAccountMessage('');
+
+    try {
+      for (const step of CONNECTION_STEPS) {
+        setConnectionStep(step);
+        await wait(800);
+      }
+
+      const account = await addCloudAccount(accountForm);
+      setConnectedAccounts((current) => [account, ...current]);
+      setAccountMessage(`${account.account_name} connected to ${account.provider.toUpperCase()}`);
+      setAccountForm({ provider: 'aws', account_name: '' });
+      setIsAddAccountOpen(false);
+      setConnectionStep('');
+    } catch {
+      setAccountMessage('Unable to add cloud account');
+      setConnectionStep('');
+    } finally {
+      setIsSavingAccount(false);
+    }
+  };
+
   return (
     <div className="page-grid">
       <section className="hero-card glass-card">
@@ -45,8 +87,14 @@ export function DashboardPage() {
           </p>
         </div>
         <div className="hero-actions">
-          <SyncButton onSync={handleSync} loading={syncing} />
+          <div className="hero-action-row">
+            <button className="primary-button secondary-button" type="button" onClick={() => setIsAddAccountOpen(true)}>
+              + Add Account
+            </button>
+            <SyncButton onSync={handleSync} loading={syncing} />
+          </div>
           <span className="sync-label">{syncLabel}</span>
+          {accountMessage ? <span className="sync-label">{accountMessage}</span> : null}
         </div>
       </section>
 
@@ -79,7 +127,67 @@ export function DashboardPage() {
         </GlassCard>
       </section>
 
+      <GlassCard title="Connected accounts" subtitle="Cloud connection status">
+        {connectedAccounts.length ? (
+          <div className="connected-accounts-list">
+            {connectedAccounts.map((account) => (
+              <div className="connected-account-row" key={account.id}>
+                <div>
+                  <strong>{account.account_name}</strong>
+                  <span>{account.provider.toUpperCase()}</span>
+                </div>
+                <span className="severity-pill severity-connected">{account.status}</span>
+              </div>
+            ))}
+          </div>
+        ) : (
+          <p className="empty-state-copy">No cloud accounts connected yet.</p>
+        )}
+      </GlassCard>
+
       <AnomaliesTable rows={dashboard.anomalies} compact />
+
+      {isAddAccountOpen ? (
+        <div className="modal-backdrop" role="presentation" onClick={() => (!isSavingAccount ? setIsAddAccountOpen(false) : null)}>
+          <div className="modal-card glass-card" role="dialog" aria-modal="true" onClick={(event) => event.stopPropagation()}>
+            <div className="card-header">
+              <div>
+                <p className="eyebrow">Connect cloud account</p>
+                <h3>Add a provider workspace</h3>
+              </div>
+            </div>
+            <form className="auth-form" onSubmit={handleAddAccount}>
+              <label className="input-group">
+                <span>Provider</span>
+                <select
+                  value={accountForm.provider}
+                  onChange={(event) => setAccountForm((current) => ({ ...current, provider: event.target.value }))}
+                  disabled={isSavingAccount}
+                >
+                  <option value="aws">AWS</option>
+                  <option value="azure">Azure</option>
+                  <option value="gcp">GCP</option>
+                </select>
+              </label>
+              <InputField
+                label="Account name"
+                placeholder="Production billing account"
+                value={accountForm.account_name}
+                onChange={(event) => setAccountForm((current) => ({ ...current, account_name: event.target.value }))}
+              />
+              {connectionStep ? <div className="connection-status">{connectionStep}</div> : null}
+              <div className="modal-actions">
+                <button className="icon-button modal-button" type="button" onClick={() => setIsAddAccountOpen(false)} disabled={isSavingAccount}>
+                  Cancel
+                </button>
+                <button className="primary-button" type="submit" disabled={isSavingAccount}>
+                  {isSavingAccount ? connectionStep || 'Connecting...' : 'Connect Account'}
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      ) : null}
     </div>
   );
 }

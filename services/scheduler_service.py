@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
+from typing import Any
 
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from apscheduler.triggers.interval import IntervalTrigger
@@ -13,9 +14,9 @@ from db.connection import (
 )
 from models.anomaly import build_anomaly_result_document
 from models.cost_data import build_cost_data_document
-from services.anomaly_detector import CloudCostAnomalyDetector
+from services.anomaly_detector import AnomalyDetectionError, CloudCostAnomalyDetector
 from services.aws_service import AwsCostExplorerError, AwsCostService, AwsCredentialsError
-from services.data_processor import CloudCostDataProcessor
+from services.data_processor import CloudCostDataProcessor, DataProcessingError
 from services.simulator_service import SimulatorService
 
 
@@ -49,24 +50,29 @@ class SchedulerService:
         active_users = await users_collection.find({"is_active": True}).to_list(length=None)
 
         for user in active_users:
-            raw_costs = await self._fetch_cost_data()
-            if not raw_costs:
+            try:
+                raw_costs = await self._fetch_cost_data()
+                if not raw_costs:
+                    continue
+
+                await self._store_cost_data(user_id=str(user["_id"]), records=raw_costs)
+
+                processed_df = self.data_processor.process(raw_costs)
+                anomaly_df = self.anomaly_detector.detect(processed_df)
+                anomaly_records = anomaly_df.to_dict(orient="records")
+                anomalies = [record for record in anomaly_records if record["is_anomaly"]]
+
+                if anomalies:
+                    await self._store_anomalies(
+                        user_id=str(user["_id"]),
+                        anomaly_records=anomalies,
+                    )
+            except (DataProcessingError, AnomalyDetectionError):
+                continue
+            except Exception:
                 continue
 
-            await self._store_cost_data(user_id=str(user["_id"]), records=raw_costs)
-
-            processed_df = self.data_processor.process(raw_costs)
-            anomaly_df = self.anomaly_detector.detect(processed_df)
-            anomaly_records = anomaly_df.to_dict(orient="records")
-            anomalies = [record for record in anomaly_records if record["is_anomaly"]]
-
-            if anomalies:
-                await self._store_anomalies(
-                    user_id=str(user["_id"]),
-                    anomaly_records=anomalies,
-                )
-
-    async def _fetch_cost_data(self) -> list[dict[str, object]]:
+    async def _fetch_cost_data(self) -> list[dict[str, Any]]:
         try:
             return self.aws_service.fetch_last_30_days_cost()
         except (AwsCredentialsError, AwsCostExplorerError):
@@ -75,7 +81,7 @@ class SchedulerService:
     async def _store_cost_data(
         self,
         user_id: str,
-        records: list[dict[str, object]],
+        records: list[dict[str, Any]],
     ) -> None:
         documents = [
             build_cost_data_document(
@@ -95,7 +101,7 @@ class SchedulerService:
     async def _store_anomalies(
         self,
         user_id: str,
-        anomaly_records: list[dict[str, object]],
+        anomaly_records: list[dict[str, Any]],
     ) -> None:
         anomaly_documents = [
             build_anomaly_result_document(

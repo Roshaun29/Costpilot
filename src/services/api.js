@@ -4,6 +4,7 @@ const API_BASE_URL = '';
 const ACCESS_TOKEN_KEY = 'auth_access_token';
 const REFRESH_TOKEN_KEY = 'auth_refresh_token';
 const USER_KEY = 'auth_user';
+const AUTH_EVENT = 'auth-state-changed';
 
 const apiClient = axios.create({
   baseURL: API_BASE_URL,
@@ -30,6 +31,10 @@ apiClient.interceptors.response.use(
   },
 );
 
+function emitAuthChange() {
+  window.dispatchEvent(new Event(AUTH_EVENT));
+}
+
 function persistAuth({ accessToken, refreshToken, user }) {
   if (accessToken) {
     localStorage.setItem(ACCESS_TOKEN_KEY, accessToken);
@@ -40,17 +45,28 @@ function persistAuth({ accessToken, refreshToken, user }) {
   if (user) {
     localStorage.setItem(USER_KEY, JSON.stringify(user));
   }
+  emitAuthChange();
 }
 
 export function clearAuth() {
   localStorage.removeItem(ACCESS_TOKEN_KEY);
   localStorage.removeItem(REFRESH_TOKEN_KEY);
   localStorage.removeItem(USER_KEY);
+  emitAuthChange();
 }
 
 export function getStoredUser() {
   const rawUser = localStorage.getItem(USER_KEY);
   return rawUser ? JSON.parse(rawUser) : null;
+}
+
+export function hasStoredAuth() {
+  return Boolean(localStorage.getItem(ACCESS_TOKEN_KEY) && localStorage.getItem(USER_KEY));
+}
+
+export function subscribeToAuthChanges(callback) {
+  window.addEventListener(AUTH_EVENT, callback);
+  return () => window.removeEventListener(AUTH_EVENT, callback);
 }
 
 function formatCurrency(value) {
@@ -171,7 +187,12 @@ export async function register(payload) {
   return login({ email: payload.email, password: payload.password });
 }
 
-export async function fetchDashboardData(provider = 'aws') {
+export async function addCloudAccount(payload) {
+  const response = await apiClient.post('/cloud/add-account', payload);
+  return response.data.data;
+}
+
+export async function fetchDashboardData(provider = 'aws_simulated') {
   const [cloudResponse, anomalyResponse] = await Promise.all([
     apiClient.get('/cloud/sync', { params: { provider } }),
     apiClient.post('/anomaly/detect', null, { params: { provider } }),
@@ -187,7 +208,7 @@ export async function fetchDashboardData(provider = 'aws') {
   };
 }
 
-export async function syncCloudData(provider = 'aws') {
+export async function syncCloudData(provider = 'aws_simulated') {
   const response = await apiClient.get('/cloud/sync', { params: { provider } });
   const costRows = response.data.data ?? [];
   const uniqueServices = new Set(costRows.map((row) => row.service));
@@ -198,7 +219,7 @@ export async function syncCloudData(provider = 'aws') {
   };
 }
 
-export async function fetchAnomalies(provider = 'aws') {
+export async function fetchAnomalies(provider = 'aws_simulated') {
   const response = await apiClient.post('/anomaly/detect', null, { params: { provider } });
   return mapAnomalyRows(response.data.data ?? []);
 }

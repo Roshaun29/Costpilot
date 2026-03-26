@@ -15,5 +15,8 @@ def get_password_hash(password: str) -> str:
 
 
 def verify_password(plain_password: str, hashed_password: str) -> bool:
-    normalized = _normalize_password(plain_password)
-    return bcrypt.checkpw(normalized, hashed_password.encode("utf-8"))
+    try:
+        normalized = _normalize_password(plain_password)
+        return bcrypt.checkpw(normalized, hashed_password.encode("utf-8"))
+    except (TypeError, ValueError):
+        return False

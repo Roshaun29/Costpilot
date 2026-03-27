@@ -9,6 +9,7 @@ from backend.utils.response import success_response, error_response
 from backend.utils.logger import log_activity
 from backend.services.simulation_engine import SimulationEngine
 from backend.services.anomaly_detector import AnomalyDetector
+from backend.services.ws_manager import broadcast_paused
 
 router = APIRouter(tags=["simulation"])
 
@@ -65,6 +66,9 @@ async def stop_simulation(current_user: dict = Depends(get_current_user), db = D
     state = await db.simulation_states.find_one({"user_id": uid})
     state.pop("_id", None)
     state["user_id"] = str(state["user_id"])
+    
+    await broadcast_paused(str(uid))
+    
     return success_response(state, "Simulation stopped")
 
 @router.post("/tick")

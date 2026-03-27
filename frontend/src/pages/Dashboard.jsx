@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback, useMemo } from 'react';
 import { motion } from 'framer-motion';
 import { useNavigate } from 'react-router-dom';
 import { Cloud, AlertTriangle, TrendingUp, DollarSign, ArrowRight } from 'lucide-react';
@@ -12,6 +12,8 @@ import Button from '../components/ui/Button';
 import CostLineChart from '../components/charts/CostLineChart';
 import AnomalyScatterChart from '../components/charts/AnomalyScatterChart';
 import ServiceBreakdownChart from '../components/charts/ServiceBreakdownChart';
+
+import LiveSection from '../components/live/LiveSection';
 
 import { getCostSummary, getCosts } from '../api/costs';
 import { getAnomalyStats, getAnomalies } from '../api/anomalies';
@@ -28,97 +30,20 @@ const itemVariants = {
   visible: { opacity: 1, y: 0, transition: { duration: 0.5, ease: 'easeOut' } }
 };
 
-export default function Dashboard() {
-  const navigate = useNavigate();
-  const [loading, setLoading] = useState(true);
-  const [data, setData] = useState({
-    summary: null,
-    anomalyStats: null,
-    simStatus: null,
-    recentAnomalies: [],
-    insights: [],
-    chartData: []
-  });
-  const [timeRange, setTimeRange] = useState('30d');
-  const [hasAccounts, setHasAccounts] = useState(true);
+// Extracted InsightIcon to prevent re-creation
+const InsightIcon = React.memo(({ type }) => {
+  if (type === 'SPIKE') return <div className="p-2 bg-accent-red/20 text-accent-red rounded-xl"><AlertTriangle size={18} /></div>;
+  if (type === 'DRIFT') return <div className="p-2 bg-yellow-500/20 text-yellow-500 rounded-xl"><TrendingUp size={18} /></div>;
+  return <div className="p-2 bg-brand/20 text-brand rounded-xl"><DollarSign size={18} /></div>;
+});
 
-  useEffect(() => {
-    fetchDashboardData('30d');
-  }, []);
-
-  const fetchDashboardData = async (range) => {
-    setLoading(true);
-    try {
-      const endDate = new Date();
-      let startDate;
-      if (range === '7d') startDate = subDays(endDate, 7);
-      else if (range === '30d') startDate = subDays(endDate, 30);
-      else startDate = subDays(endDate, 90);
-      
-      const sd = format(startDate, 'yyyy-MM-dd');
-      const ed = format(endDate, 'yyyy-MM-dd');
-
-      const [sumRes, anomStatsRes, simRes, anomListRes, insRes, costRes] = await Promise.all([
-        getCostSummary(),
-        getAnomalyStats(),
-        getStatus(),
-        getAnomalies({ limit: 5 }),
-        api.get('/api/insights'),
-        getCosts({ start_date: sd, end_date: ed, granularity: 'daily' })
-      ]);
-
-      const sum = sumRes.data.data;
-      const sim = simRes.data.data;
-      
-      if (sim.accounts_monitored === 0) {
-        setHasAccounts(false);
-      } else {
-        setHasAccounts(true);
-      }
-
-      setData({
-        summary: sum,
-        anomalyStats: anomStatsRes.data.data,
-        simStatus: sim,
-        recentAnomalies: anomListRes.data.data.items || [],
-        insights: insRes.data.data || [],
-        chartData: costRes.data.data || []
-      });
-    } catch (err) {
-      console.error(err);
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  const handleRangeChange = (range) => {
-    setTimeRange(range);
-    fetchDashboardData(range);
-  };
-
-  const InsightIcon = ({ type }) => {
-    if (type === 'SPIKE') return <div className="p-2 bg-accent-red/20 text-accent-red rounded-xl"><AlertTriangle size={18} /></div>;
-    if (type === 'DRIFT') return <div className="p-2 bg-yellow-500/20 text-yellow-500 rounded-xl"><TrendingUp size={18} /></div>;
-    return <div className="p-2 bg-brand/20 text-brand rounded-xl"><DollarSign size={18} /></div>;
-  };
-
-  if (!loading && !hasAccounts) {
-    return (
-      <div className="flex flex-col items-center justify-center h-[70vh] text-center max-w-lg mx-auto">
-        <div className="w-24 h-24 bg-white/5 rounded-full flex items-center justify-center mb-6 border border-white/10">
-          <Cloud size={48} className="text-brand" />
-        </div>
-        <h2 className="text-3xl font-display font-medium mb-3">Connect your first cloud account</h2>
-        <p className="text-text-secondary mb-8 leading-relaxed">CostPilot will simulate real billing data, run Isolation Forests, and detect anomalies automatically via background Engine.</p>
-        <Button size="lg" onClick={() => navigate('/accounts')}>Add Cloud Account</Button>
-      </div>
-    );
-  }
+const StaticSection = React.memo(({ data, loading, navigate, timeRange, onRangeChange }) => {
+  // Memoize handlers passed down to prevent children re-rendering
+  const goAnomalies = useCallback(() => navigate('/anomalies'), [navigate]);
+  const goInsights = useCallback(() => navigate('/insights'), [navigate]);
 
   return (
-    <motion.div variants={containerVariants} initial="hidden" animate="visible" className="space-y-6">
-      
-      {/* ROW 1: STATS */}
+    <>
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
         <motion.div variants={itemVariants}>
           <StatCard 
@@ -160,7 +85,6 @@ export default function Dashboard() {
         </motion.div>
       </div>
 
-      {/* ROW 2: Main Chart */}
       <motion.div variants={itemVariants}>
         <Card className="col-span-1 border-0 bg-surface-raised/50 backdrop-blur-xl ring-1 ring-white/10 p-0 overflow-hidden">
           <div className="p-6 border-b border-white/[0.05] flex items-center justify-between">
@@ -172,7 +96,7 @@ export default function Dashboard() {
               {['7d', '30d', '90d'].map((r) => (
                 <button 
                   key={r}
-                  onClick={() => handleRangeChange(r)}
+                  onClick={() => onRangeChange(r)}
                   className={`px-3 py-1 text-xs font-bold rounded-lg transition-colors ${timeRange === r ? 'bg-surface text-brand ring-1 ring-white/10' : 'text-text-secondary hover:text-white'}`}
                 >
                   {r.toUpperCase()}
@@ -186,7 +110,6 @@ export default function Dashboard() {
         </Card>
       </motion.div>
 
-      {/* ROW 3: Anomalies */}
       <div className="flex flex-col xl:flex-row gap-6">
         <motion.div variants={itemVariants} className="xl:w-[58%]">
           <Card className="h-full">
@@ -200,7 +123,7 @@ export default function Dashboard() {
           <Card className="h-full flex flex-col">
             <div className="flex justify-between items-center mb-6">
               <h2 className="text-lg font-display font-medium">Recent Anomalies</h2>
-              <button className="text-xs font-medium text-brand hover:underline" onClick={() => navigate('/anomalies')}>View all</button>
+              <button className="text-xs font-medium text-brand hover:underline" onClick={goAnomalies}>View all</button>
             </div>
             
             <div className="flex-1 space-y-3">
@@ -225,7 +148,7 @@ export default function Dashboard() {
                     
                     <div className="flex items-center gap-4">
                       <span className="font-mono text-accent-red text-sm font-bold">+{Number(anom.deviation_percent).toFixed(1)}%</span>
-                      <button className="p-2 bg-white/5 rounded-lg opacity-0 group-hover:opacity-100 transition-opacity hover:bg-brand/20 hover:text-brand" onClick={() => navigate('/anomalies')}>
+                      <button className="p-2 bg-white/5 rounded-lg opacity-0 group-hover:opacity-100 transition-opacity hover:bg-brand/20 hover:text-brand" onClick={() => navigate('/anomalies', { state: { selectedAnomalyId: anom.id } })}>
                         <ArrowRight size={14} />
                       </button>
                     </div>
@@ -237,7 +160,6 @@ export default function Dashboard() {
         </motion.div>
       </div>
 
-      {/* ROW 4: Breakdown & AI */}
       <div className="flex flex-col lg:flex-row gap-6">
         <motion.div variants={itemVariants} className="w-full lg:w-1/2">
           <Card className="h-full">
@@ -251,7 +173,7 @@ export default function Dashboard() {
           <Card className="h-full">
             <div className="flex justify-between items-center mb-6">
               <h2 className="text-lg font-display font-medium">AI Insights</h2>
-              <button className="text-xs font-medium text-text-secondary hover:text-white" onClick={() => navigate('/insights')}>Regenerate</button>
+              <button className="text-xs font-medium text-text-secondary hover:text-white" onClick={goInsights}>Regenerate</button>
             </div>
             
             <div className="space-y-4">
@@ -274,6 +196,107 @@ export default function Dashboard() {
           </Card>
         </motion.div>
       </div>
+    </>
+  );
+});
+
+export default function Dashboard() {
+  const navigate = useNavigate();
+  const [loading, setLoading] = useState(true);
+  const [data, setData] = useState({
+    summary: null,
+    anomalyStats: null,
+    simStatus: null,
+    recentAnomalies: [],
+    insights: [],
+    chartData: []
+  });
+  const [timeRange, setTimeRange] = useState('30d');
+  const [hasAccounts, setHasAccounts] = useState(true);
+
+  // Poll main dashboard 30s
+  useEffect(() => {
+    fetchDashboardData(timeRange);
+    const interval = setInterval(() => {
+      fetchDashboardData(timeRange);
+    }, 30000);
+    return () => clearInterval(interval);
+  }, [timeRange]);
+
+  const fetchDashboardData = async (range) => {
+    try {
+      const endDate = new Date();
+      let startDate;
+      if (range === '7d') startDate = subDays(endDate, 7);
+      else if (range === '30d') startDate = subDays(endDate, 30);
+      else startDate = subDays(endDate, 90);
+      
+      const sd = format(startDate, 'yyyy-MM-dd');
+      const ed = format(endDate, 'yyyy-MM-dd');
+
+      const [sumRes, anomStatsRes, simRes, anomListRes, insRes, costRes] = await Promise.all([
+        getCostSummary(),
+        getAnomalyStats(),
+        getStatus(),
+        getAnomalies({ limit: 5 }),
+        api.get('/api/insights'),
+        getCosts({ start_date: sd, end_date: ed, granularity: 'daily' })
+      ]);
+
+      const sim = simRes.data.data;
+      if (sim.accounts_monitored === 0) {
+        setHasAccounts(false);
+      } else {
+        setHasAccounts(true);
+      }
+
+      setData({
+        summary: sumRes.data.data,
+        anomalyStats: anomStatsRes.data.data,
+        simStatus: simRes.data.data,
+        recentAnomalies: anomListRes.data.data.items || [],
+        insights: insRes.data.data || [],
+        chartData: costRes.data.data || []
+      });
+    } catch (err) {
+      console.error('Failed dashboard data load', err);
+    } finally {
+      if (loading) setLoading(false);
+    }
+  };
+
+  const handleRangeChange = useCallback((range) => {
+    setLoading(true); // show loader only on user action
+    setTimeRange(range);
+  }, []);
+
+  const memoizedData = useMemo(() => data, [data]);
+
+  if (!loading && !hasAccounts) {
+    return (
+      <div className="flex flex-col items-center justify-center h-[70vh] text-center max-w-lg mx-auto">
+        <div className="w-24 h-24 bg-white/5 rounded-full flex items-center justify-center mb-6 border border-white/10">
+          <Cloud size={48} className="text-brand" />
+        </div>
+        <h2 className="text-3xl font-display font-medium mb-3">Connect your first cloud account</h2>
+        <p className="text-text-secondary mb-8 leading-relaxed">CostPilot will simulate real billing data, run Isolation Forests, and detect anomalies automatically via background Engine.</p>
+        <Button size="lg" onClick={() => navigate('/accounts')}>Add Cloud Account</Button>
+      </div>
+    );
+  }
+
+  return (
+    <motion.div variants={containerVariants} initial="hidden" animate="visible" className="space-y-6">
+      
+      <LiveSection />
+
+      <StaticSection 
+        data={memoizedData} 
+        loading={loading} 
+        navigate={navigate} 
+        timeRange={timeRange} 
+        onRangeChange={handleRangeChange} 
+      />
 
     </motion.div>
   );

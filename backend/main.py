@@ -7,7 +7,7 @@ import logging
 from backend.db.mongodb import connect_to_mongo, close_mongo_connection, init_indexes
 from backend.services.scheduler import start_scheduler
 
-from backend.routes import auth, cloud_accounts, costs, anomalies, alerts, simulation, insights, activity, settings
+from backend.routes import auth, cloud_accounts, costs, anomalies, alerts, simulation, insights, activity, settings, websocket
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -58,3 +58,4 @@ app.include_router(simulation.router, prefix="/api/simulation", tags=["Simulatio
 app.include_router(insights.router, prefix="/api/insights", tags=["Insights"])
 app.include_router(activity.router, prefix="/api/activity", tags=["Activity"])
 app.include_router(settings.router, prefix="/api/settings", tags=["Settings"])
+app.include_router(websocket.router, prefix="/api", tags=["Websocket"])

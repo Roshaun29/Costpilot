@@ -140,7 +140,7 @@ export default function Alerts() {
                     {formatDistanceToNow(new Date(alert.sent_at), { addSuffix: true })}
                   </span>
                   {alert.anomaly_id && (
-                    <Link to={`/anomalies`} className="text-[11px] font-bold text-brand hover:underline flex items-center gap-1">
+                    <Link to={`/anomalies`} state={{ selectedAnomalyId: alert.anomaly_id }} className="text-[11px] font-bold text-brand hover:underline flex items-center gap-1">
                       View Anomaly <ArrowRight size={10} />
                     </Link>
                   )}

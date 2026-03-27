@@ -1,5 +1,6 @@
 import { useState, useEffect } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
+import { useLocation } from 'react-router-dom';
 import { AlertTriangle, TrendingUp, CheckCircle, Clock, ChevronRight, X, Filter } from 'lucide-react';
 import { formatDistanceToNow, format, parseISO } from 'date-fns';
 import toast from 'react-hot-toast';
@@ -21,6 +22,8 @@ export default function Anomalies() {
   const [stats, setStats] = useState(null);
   const [anomalies, setAnomalies] = useState([]);
   const [accounts, setAccounts] = useState([]);
+  const location = useLocation();
+  
   
   const [filters, setFilters] = useState({ severity: '', status: '', account_id: '' });
   const [page, setPage] = useState(1);
@@ -35,6 +38,14 @@ export default function Anomalies() {
   useEffect(() => {
     fetchInitial();
   }, [filters, page]);
+
+  useEffect(() => {
+    if (location.state?.selectedAnomalyId && !loading) {
+      handleDetails(location.state.selectedAnomalyId);
+      // Clear state so it doesn't re-trigger on refresh
+      window.history.replaceState({}, document.title);
+    }
+  }, [location.state?.selectedAnomalyId, loading]);
 
   const fetchInitial = async () => {
     setLoading(true);

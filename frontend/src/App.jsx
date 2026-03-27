@@ -4,6 +4,9 @@ import { useAuthStore } from './store/authStore';
 import { useSimulationStore } from './store/simulationStore';
 import { useNotificationStore } from './store/notificationStore';
 
+import { useLiveData } from './hooks/useLiveData';
+import AnomalyToast from './components/live/AnomalyToast';
+
 import Layout from './components/layout/Layout';
 import PageLoader from './components/ui/PageLoader';
 
@@ -31,8 +34,9 @@ function PrivateRoute({ children }) {
 export default function App() {
   const [initing, setIniting] = useState(true);
   const { initialize, isAuthenticated } = useAuthStore();
-  const { startPolling: startSim, stopPolling: stopSim } = useSimulationStore();
+  const { initializeSync } = useSimulationStore();
   const { startPolling: startNotif, stopPolling: stopNotif } = useNotificationStore();
+  const { newAnomaly } = useLiveData();
 
   useEffect(() => {
     initialize().finally(() => setIniting(false));
@@ -40,21 +44,20 @@ export default function App() {
 
   useEffect(() => {
     if (isAuthenticated) {
-      startSim();
+      initializeSync();
       startNotif();
     } else {
-      stopSim();
       stopNotif();
     }
     return () => {
-      stopSim();
       stopNotif();
     };
-  }, [isAuthenticated, startSim, stopSim, startNotif, stopNotif]);
+  }, [isAuthenticated, initializeSync, startNotif, stopNotif]);
 
   if (initing) return <PageLoader />;
 
   return (
+  <>
     <Routes>
       <Route path="/login" element={!isAuthenticated ? <Login /> : <Navigate to="/dashboard" />} />
       <Route path="/register" element={!isAuthenticated ? <Register /> : <Navigate to="/dashboard" />} />
@@ -73,5 +76,7 @@ export default function App() {
 
       <Route path="*" element={<NotFound />} />
     </Routes>
+    <AnomalyToast newAnomaly={newAnomaly} />
+  </>
   );
 }

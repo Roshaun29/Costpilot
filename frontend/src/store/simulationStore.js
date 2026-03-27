@@ -9,12 +9,24 @@ export const useSimulationStore = create((set, get) => ({
   accountsMonitored: 0,
   intervalId: null,
 
-  setStatus: (status) => set({
-    isRunning: status.is_running,
-    lastTickAt: status.last_tick_at,
-    tickCount: status.tick_count,
-    accountsMonitored: status.accounts_monitored
-  }),
+  setStatus: (status) => {
+    const wasRunning = get().isRunning;
+    const isRunningNow = status.is_running;
+    
+    set({
+      isRunning: isRunningNow,
+      lastTickAt: status.last_tick_at,
+      tickCount: status.tick_count,
+      accountsMonitored: status.accounts_monitored
+    });
+
+    // Auto-manage polling interval based on status
+    if (!wasRunning && isRunningNow) {
+      get().startAutoSync();
+    } else if (wasRunning && !isRunningNow) {
+      get().stopAutoSync();
+    }
+  },
 
   fetchStatus: async () => {
     try {
@@ -25,9 +37,9 @@ export const useSimulationStore = create((set, get) => ({
     }
   },
 
-  startPolling: () => {
-    get().stopPolling();
-    get().fetchStatus();
+  startAutoSync: () => {
+    const { intervalId } = get();
+    if (intervalId) return; // Already polling
     
     const interval = setInterval(() => {
       get().fetchStatus();
@@ -36,10 +48,27 @@ export const useSimulationStore = create((set, get) => ({
     set({ intervalId: interval });
   },
 
-  stopPolling: () => {
+  stopAutoSync: () => {
     const { intervalId } = get();
     if (intervalId) clearInterval(intervalId);
     set({ intervalId: null });
+  },
+
+  // Called from App.jsx initialization
+  initializeSync: async () => {
+    await get().fetchStatus();
+  },
+
+  // Called by useLiveData on incoming WS events
+  handleWsEvent: (data) => {
+    if (data.type === 'simulation_paused') {
+      set({ isRunning: false });
+      get().stopAutoSync();
+    } else if (data.type === 'live_metrics') {
+      const previousState = get().isRunning;
+      set({ isRunning: true, tickCount: data.tick, lastTickAt: new Date().toISOString() });
+      if (!previousState) get().startAutoSync();
+    }
   },
 
   toggle: async () => {

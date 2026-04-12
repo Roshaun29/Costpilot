@@ -1,37 +1,33 @@
 from fastapi import APIRouter, Depends, HTTPException, status
-from bson import ObjectId
+from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy import select, desc
+from typing import List
 
-from backend.db.mongodb import get_db
-from backend.utils.jwt_utils import get_current_user
-from backend.utils.response import success_response
-from backend.services.insights_service import generate_insights
+from db.mysql import get_db
+from models.insight import Insight, InsightResponse
+from models.user import User
+from utils.jwt_utils import get_current_user
+from utils.response import success_response
+from services.insights_service import generate_insights
 
 router = APIRouter(tags=["insights"])
 
-@router.get("")
-async def get_insights(current_user: dict = Depends(get_current_user), db = Depends(get_db)):
-    uid = current_user["_id"]
-    items = await db.insights.find({"user_id": uid}).sort("created_at", -1).limit(10).to_list(None)
+@router.get("", response_model=None)
+async def get_insights(current_user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db)):
+    uid = current_user.id
+    
+    # Check if we have recent insights
+    stmt = select(Insight).where(Insight.user_id == uid).order_by(desc(Insight.created_at)).limit(10)
+    res = await db.execute(stmt)
+    items = res.scalars().all()
     
     if not items:
-        items = await generate_insights(str(uid), db)
+        items = await generate_insights(uid, db)
     
-    for item in items:
-        item["id"] = str(item.pop("_id", item.get("id")))
-        item["user_id"] = str(item["user_id"])
-        item["account_id"] = str(item.get("account_id")) if item.get("account_id") else None
-        item["related_anomaly_id"] = str(item.get("related_anomaly_id")) if item.get("related_anomaly_id") else None
-        
     return success_response(items)
 
 @router.post("/generate")
-async def manual_generate(current_user: dict = Depends(get_current_user), db = Depends(get_db)):
-    uid = current_user["_id"]
-    items = await generate_insights(str(uid), db)
-    for item in items:
-        item["id"] = str(item.pop("_id", item.get("id")))
-        item["user_id"] = str(item["user_id"])
-        item["account_id"] = str(item.get("account_id")) if item.get("account_id") else None
-        item["related_anomaly_id"] = str(item.get("related_anomaly_id")) if item.get("related_anomaly_id") else None
-        
+async def manual_generate(current_user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db)):
+    uid = current_user.id
+    items = await generate_insights(uid, db)
     return success_response(items, "Insights generated successfully")

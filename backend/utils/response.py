@@ -1,46 +1,38 @@
 from datetime import datetime
-from bson import ObjectId
+import json
 
 def serialize_doc(doc):
+    """Recursively serializes data, handling datetimes etc."""
     if isinstance(doc, list):
         return [serialize_doc(item) for item in doc]
     elif isinstance(doc, dict):
         new_doc = {}
         for k, v in doc.items():
-            if k == "_id":
-                new_doc["id"] = str(v)
-            else:
-                new_doc[k] = serialize_doc(v)
+            new_doc[k] = serialize_doc(v)
         return new_doc
-    elif isinstance(doc, ObjectId):
-        return str(doc)
     elif isinstance(doc, datetime):
         return doc.isoformat()
     return doc
 
 def success_response(data=None, message="Success", meta=None):
-    resp = {
+    return {
         "success": True,
         "message": message,
-        "data": serialize_doc(data) if data is not None else None
+        "data": serialize_doc(data) if data is not None else None,
+        "meta": meta
     }
-    if meta:
-        resp["meta"] = meta
-    return resp
 
 def error_response(message="An error occurred", details=None):
-    resp = {
+    return {
         "success": False,
-        "message": message
+        "message": message,
+        "details": details
     }
-    if details:
-        resp["details"] = details
-    return resp
 
 def paginated_response(items, total, page, limit, message="Success"):
     return success_response(
         data={
-            "items": items,
+            "items": serialize_doc(items),
             "total": total,
             "page": page,
             "limit": limit

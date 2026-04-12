@@ -1,96 +1,108 @@
-from datetime import datetime, timedelta
-from bson import ObjectId
-from backend.utils.logger import logger
+from datetime import datetime, date, timedelta
+from sqlalchemy import select, func, delete, insert
+from sqlalchemy.ext.asyncio import AsyncSession
+from models.cost_data import CostData
+from models.anomaly import AnomalyResult
+from models.cloud_account import CloudAccount
+from models.insight import Insight
+from utils.logger import logger
 
-async def generate_insights(user_id: str, db) -> list:
-    uid = ObjectId(user_id)
+async def generate_insights(user_id: str, db: AsyncSession) -> list:
+    """Analyzes recent cost data and anomalies to generate optimization insights."""
     now = datetime.utcnow()
+    one_month_ago = date.today() - timedelta(days=30)
     
-    anomalies = await db.anomalies.aggregate([
-        {"$match": {"user_id": uid, "anomaly_date": {"$gte": now - timedelta(days=30)}}},
-        {"$sort": {"anomaly_date": -1}},
-        {"$limit": 10},
-        {"$lookup": {"from": "cloud_accounts", "localField": "account_id", "foreignField": "_id", "as": "acc"}},
-        {"$unwind": {"path": "$acc", "preserveNullAndEmptyArrays": True}}
-    ]).to_list(None)
+    # 1. Pull recent anomalies for context
+    anoms_stmt = select(AnomalyResult).where(AnomalyResult.user_id == user_id, AnomalyResult.anomaly_date >= one_month_ago).order_by(AnomalyResult.detected_at.desc()).limit(10)
+    anoms_res = await db.execute(anoms_stmt)
+    anomalies = anoms_res.scalars().all()
     
-    current_month_start = now.replace(day=1, hour=0, minute=0, second=0, microsecond=0)
-    if current_month_start.month == 1:
-        prev_month_start = current_month_start.replace(year=current_month_start.year - 1, month=12)
-    else:
-        prev_month_start = current_month_start.replace(month=current_month_start.month - 1)
+    # 2. Pull cost data for M-o-M comparison
+    mid_month = date.today().replace(day=1)
+    prev_month_end = mid_month - timedelta(days=1)
+    prev_month_start = prev_month_end.replace(day=1)
     
-    curr_docs = await db.cost_data.find({"user_id": uid, "date": {"$gte": current_month_start}}).to_list(None)
-    prev_docs = await db.cost_data.find({"user_id": uid, "date": {"$gte": prev_month_start, "$lt": current_month_start}}).to_list(None)
+    # Fetch current month costs
+    curr_stmt = select(CostData.service, CostData.account_id, CostData.cost_usd).where(CostData.user_id == user_id, CostData.cost_date >= mid_month)
+    curr_res = await db.execute(curr_stmt)
+    curr_rows = curr_res.all()
     
-    curr_total = sum(d["cost_usd"] for d in curr_docs)
-    prev_total = sum(d["cost_usd"] for d in prev_docs)
+    # Fetch prev month costs
+    prev_stmt = select(func.sum(CostData.cost_usd)).where(CostData.user_id == user_id, CostData.cost_date >= prev_month_start, CostData.cost_date <= prev_month_end)
+    prev_res = await db.execute(prev_stmt)
+    prev_total = prev_res.scalar() or 0.01
     
+    curr_total = sum(r.cost_usd for r in curr_rows)
     service_costs = {}
     account_costs = {}
-    for d in curr_docs:
-        service_costs[d["service"]] = service_costs.get(d["service"], 0) + d["cost_usd"]
-        account_costs[d["account_id"]] = account_costs.get(d["account_id"], 0) + d["cost_usd"]
+    for r in curr_rows:
+        service_costs[r.service] = service_costs.get(r.service, 0) + r.cost_usd
+        account_costs[r.account_id] = account_costs.get(r.account_id, 0) + r.cost_usd
         
-    top_service = max(service_costs.items(), key=lambda x: x[1])[0] if service_costs else "Unknown"
+    top_service = max(service_costs.items(), key=lambda x: x[1])[0] if service_costs else "Cloud Resources"
     top_service_pct = (service_costs[top_service] / curr_total * 100) if curr_total > 0 else 0
-    delta = ((curr_total - prev_total) / prev_total * 100) if prev_total > 0 else 0
-    
-    accounts = await db.cloud_accounts.find({"user_id": uid}).to_list(None)
+    delta = ((curr_total - prev_total) / prev_total * 100)
     
     new_insights = []
     
-    new_insights.append({
-        "type": "MOM",
-        "headline": "Month-over-month Spend Analysis",
-        "body": f"Your total cloud spend {'increased' if delta > 0 else 'decreased'} by {abs(delta):.1f}% compared to last month (${curr_total:.2f} vs ${prev_total:.2f}). {top_service} was the largest contributor at {top_service_pct:.0f}% of total spend.",
-        "user_id": uid,
-        "created_at": now
-    })
+    # MOM Analysis
+    new_insights.append(Insight(
+        user_id=user_id,
+        insight_type="MOM",
+        headline="Month-over-month Spend Analysis",
+        body=f"Your total cloud spend {'increased' if delta > 0 else 'decreased'} by {abs(delta):.1f}% compared to last month (₹{curr_total:.2f} vs ₹{prev_total:.2f}). {top_service} was the largest contributor at {top_service_pct:.0f}% of total spend."
+    ))
     
-    days_in_month = (current_month_start.replace(month=current_month_start.month % 12 + 1, day=1) - timedelta(days=1)).day
-    days_passed = max(1, now.day)
+    # Budget Projection
+    acc_stmt = select(CloudAccount).where(CloudAccount.user_id == user_id)
+    acc_res = await db.execute(acc_stmt)
+    accounts = acc_res.scalars().all()
+    
+    days_in_month = calendar_days(date.today().year, date.today().month)
+    days_passed = max(1, date.today().day)
+    
     for acc in accounts:
-        aid = acc["_id"]
-        budget = acc.get("monthly_budget", 5000)
-        cost_so_far = account_costs.get(aid, 0)
+        cost_so_far = account_costs.get(acc.id, 0)
         projected = (cost_so_far / days_passed) * days_in_month
+        budget = acc.monthly_budget
         overage = ((projected - budget) / budget * 100) if budget > 0 else 0
         
-        new_insights.append({
-            "type": "BUDGET",
-            "headline": f"Budget Projection: {acc.get('account_name', 'Account')}",
-            "body": f"At current spend rate, {acc.get('account_name', 'Account')} is projected to reach ${projected:.2f} by month-end, which is {abs(overage):.0f}% {'above' if overage > 0 else 'within'} your ${budget:.2f} budget.",
-            "user_id": uid,
-            "account_id": aid,
-            "created_at": now
-        })
+        new_insights.append(Insight(
+            user_id=user_id,
+            account_id=acc.id,
+            insight_type="BUDGET",
+            headline=f"Budget Projection: {acc.account_name}",
+            body=f"At current spend rate, {acc.account_name} is projected to reach ₹{projected:,.2f} by month-end, which is {abs(overage):.0f}% {'above' if overage > 0 else 'within'} your ₹{budget:,.2f} budget."
+        ))
         
+    # Anomaly Contextualization — using new Explainability module
+    from services.explainability import generate_insight_text
     for a in anomalies:
-        acc_name = a.get("acc", {}).get("account_name", "Unknown Account")
-        if a["detection_method"] in ["isolation_forest", "zscore", "combined"] and a["deviation_percent"] > 100:
-            new_insights.append({
-                "type": "SPIKE",
-                "headline": f"Cost Spike in {a['service']}",
-                "body": f"Your {a['service']} costs on {acc_name} spiked {a['deviation_percent']:.0f}% above the 30-day baseline on {a['anomaly_date'].strftime('%Y-%m-%d')}. Actual spend was ${a['actual_cost']:.2f} vs expected ${a['expected_cost']:.2f}. Consider reviewing recent deployments or auto-scaling configurations.",
-                "user_id": uid,
-                "account_id": a["account_id"],
-                "related_anomaly_id": a["_id"],
-                "created_at": now
-            })
-        elif a["deviation_percent"] > 0:
-            new_insights.append({
-                "type": "DRIFT",
-                "headline": f"Cost Drift in {a['service']}",
-                "body": f"A gradual cost drift has been detected in {a['service']} over the past 5 days with a cumulative increase of {a['deviation_percent']:.0f}%. This pattern often indicates uncleaned resources or increased traffic. Recommended: audit active instances.",
-                "user_id": uid,
-                "account_id": a["account_id"],
-                "related_anomaly_id": a["_id"],
-                "created_at": now
-            })
-            
-    await db.insights.delete_many({"user_id": uid})
-    if new_insights:
-        await db.insights.insert_many(new_insights)
+        if a.deviation_percent and a.deviation_percent > 100:
+            new_insights.append(Insight(
+                user_id=user_id,
+                account_id=a.account_id,
+                related_anomaly_id=a.id,
+                insight_type="SPIKE",
+                headline=f"Cost Spike in {a.service} (+{a.deviation_percent:.0f}%)",
+                body=generate_insight_text(
+                    service=a.service,
+                    curr_total=float(a.actual_cost or 0),
+                    prev_total=float(a.expected_cost or 0),
+                    provider="Cloud",
+                    deviation_percent=float(a.deviation_percent or 0),
+                    anomaly_date=a.anomaly_date,
+                    account_name=a.account_id[:8],
+                )
+            ))
+
+    # Clear old and save new
+    await db.execute(delete(Insight).where(Insight.user_id == user_id))
+    db.add_all(new_insights)
+    await db.commit()
     
-    return sorted(new_insights, key=lambda x: getattr(x, 'created_at', now), reverse=True)[:10]
+    return new_insights
+
+def calendar_days(year, month):
+    import calendar
+    return calendar.monthrange(year, month)[1]

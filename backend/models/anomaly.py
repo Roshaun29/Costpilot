@@ -1,79 +1,47 @@
-from pydantic import BaseModel, Field, ConfigDict, GetJsonSchemaHandler
-from pydantic_core import core_schema
-from typing import Optional, Annotated, Any, Literal
-from datetime import datetime
-from enum import Enum
-from bson import ObjectId
+from sqlalchemy import String, Float, Date, DateTime, Text
+from sqlalchemy.orm import Mapped, mapped_column
+from datetime import datetime, date
+from typing import Optional
+from db.mysql import Base
+from .base import new_uuid
+from pydantic import BaseModel
 
-class PyObjectId(ObjectId):
-    @classmethod
-    def __get_pydantic_core_schema__(cls, _source_type: Any, _handler: GetJsonSchemaHandler) -> core_schema.CoreSchema:
-        return core_schema.json_or_python_schema(
-            json_schema=core_schema.str_schema(),
-            python_schema=core_schema.union_schema([
-                core_schema.is_instance_schema(ObjectId),
-                core_schema.chain_schema([
-                    core_schema.str_schema(),
-                    core_schema.no_info_plain_validator_function(cls.validate),
-                ])
-            ]),
-            serialization=core_schema.plain_serializer_function_ser_schema(str),
-        )
-    @classmethod
-    def validate(cls, v: Any) -> ObjectId:
-        if not ObjectId.is_valid(v):
-            raise ValueError("Invalid ObjectId")
-        return ObjectId(v)
+class AnomalyResult(Base):
+    __tablename__ = "anomaly_results"
+    __table_args__ = {"extend_existing": True}
+    
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=new_uuid)
+    account_id: Mapped[str] = mapped_column(String(36), nullable=False)
+    user_id: Mapped[str] = mapped_column(String(36), nullable=False)
+    detected_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+    service: Mapped[str] = mapped_column(String(100), nullable=False)
+    anomaly_date: Mapped[date] = mapped_column(Date, nullable=False)
+    expected_cost: Mapped[Optional[float]] = mapped_column(Float)
+    actual_cost: Mapped[Optional[float]] = mapped_column(Float)
+    deviation_percent: Mapped[Optional[float]] = mapped_column(Float)
+    severity: Mapped[str] = mapped_column(String(20), default="medium")
+    detection_method: Mapped[str] = mapped_column(String(30), default="combined")
+    anomaly_score: Mapped[Optional[float]] = mapped_column(Float)
+    status: Mapped[str] = mapped_column(String(20), default="open")
+    notes: Mapped[Optional[str]] = mapped_column(Text)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
 
-class SeverityEnum(str, Enum):
-    low = "low"
-    medium = "medium"
-    high = "high"
-    critical = "critical"
-
-class DetectionMethodEnum(str, Enum):
-    isolation_forest = "isolation_forest"
-    zscore = "zscore"
-    combined = "combined"
-
-class AnomalyStatusEnum(str, Enum):
-    open = "open"
-    acknowledged = "acknowledged"
-    resolved = "resolved"
-
-class AnomalyBase(BaseModel):
-    account_id: PyObjectId
-    user_id: PyObjectId
-    detected_at: datetime
+class AnomalyResponse(BaseModel):
+    id: str
+    account_id: str
+    user_id: str
     service: str
-    anomaly_date: datetime
-    expected_cost: float
-    actual_cost: float
-    deviation_percent: float
-    severity: SeverityEnum
-    detection_method: DetectionMethodEnum
-    anomaly_score: float
-    status: AnomalyStatusEnum = AnomalyStatusEnum.open
-    notes: Optional[str] = None
+    anomaly_date: date
+    expected_cost: Optional[float]
+    actual_cost: Optional[float]
+    deviation_percent: Optional[float]
+    severity: str
+    detection_method: str
+    status: str
+    notes: Optional[str]
+    detected_at: datetime
+    model_config = {"from_attributes": True}
 
 class AnomalyStatusUpdate(BaseModel):
-    status: AnomalyStatusEnum
+    status: str
     notes: Optional[str] = None
-
-class AnomalyResponse(AnomalyBase):
-    id: Annotated[PyObjectId, Field(alias="_id", default_factory=PyObjectId)]
-    created_at: datetime
-
-    model_config = ConfigDict(
-        arbitrary_types_allowed=True,
-        populate_by_name=True
-    )
-
-class AnomalyInDB(AnomalyBase):
-    id: Annotated[PyObjectId, Field(alias="_id", default_factory=PyObjectId)]
-    created_at: datetime = Field(default_factory=datetime.utcnow)
-
-    model_config = ConfigDict(
-        arbitrary_types_allowed=True,
-        populate_by_name=True
-    )

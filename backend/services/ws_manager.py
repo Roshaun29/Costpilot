@@ -6,12 +6,17 @@ class ConnectionManager:
         self.active_connections: dict[str, list[WebSocket]] = {}
 
     async def connect(self, websocket: WebSocket, client_id: str):
-        await websocket.accept()
-        if client_id not in self.active_connections:
-            self.active_connections[client_id] = []
-        self.active_connections[client_id].append(websocket)
+        try:
+            await websocket.accept()
+            if client_id not in self.active_connections:
+                self.active_connections[client_id] = []
+            self.active_connections[client_id].append(websocket)
+            print(f"[WS] Connected: {client_id}")
+        except Exception as e:
+            print(f"[WS] Connection error for {client_id}: {e}")
 
     def disconnect(self, websocket: WebSocket, client_id: str):
+        print(f"[WS] Disconnecting: {client_id}")
         if client_id in self.active_connections:
             if websocket in self.active_connections[client_id]:
                 self.active_connections[client_id].remove(websocket)
@@ -32,7 +37,11 @@ async def broadcast_anomaly(client_id: str, anomaly_data: dict):
     await manager.broadcast(client_id, anomaly_data)
 
 async def broadcast_live_metrics(client_id: str, message_data: dict):
+    print(f"[WS TICK] account={message_data.get('account_id')} rate={message_data.get('total_cost_rate_per_hour')}")
     await manager.broadcast(client_id, {"type": "live_metrics", **message_data})
 
 async def broadcast_paused(client_id: str):
     await manager.broadcast(client_id, {"type": "simulation_paused"})
+
+async def broadcast_alert(client_id: str, alert_data: dict):
+    await manager.broadcast(client_id, {"type": "new_alert", "alert": alert_data})

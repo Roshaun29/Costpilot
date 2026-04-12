@@ -10,6 +10,7 @@ import CostLineChart from '../components/charts/CostLineChart';
 
 import { getCosts } from '../api/costs';
 import { getAccounts } from '../api/accounts';
+import { formatINR } from '../utils/currency';
 
 export default function CostExplorer() {
   const [loading, setLoading] = useState(true);
@@ -62,6 +63,7 @@ export default function CostExplorer() {
   };
 
   const handleApplyFilters = () => {
+    if (loading) return;
     fetchCosts(filters);
   };
 
@@ -85,7 +87,7 @@ export default function CostExplorer() {
   const totalPages = Math.ceil(sortedData.length / rowsPerPage);
 
   const exportCSV = () => {
-    const headers = ['Date', 'Service', 'Account', 'Cost USD', 'Anomaly Detected'];
+    const headers = ['Date', 'Service', 'Account', 'Cost INR', 'Anomaly Detected'];
     const csvContent = [
       headers.join(','),
       ...sortedData.map(r => [
@@ -199,7 +201,7 @@ export default function CostExplorer() {
                 </th>
                 <th className="p-4 text-xs tracking-wider text-text-secondary font-bold uppercase">Account (Virtual)</th>
                 <th className="p-4 text-xs tracking-wider text-text-secondary font-bold uppercase cursor-pointer hover:text-white transition-colors text-right" onClick={() => handleSort('cost_usd')}>
-                  <div className="flex items-center justify-end gap-2">Cost (USD) {sortConfig.key === 'cost_usd' && (sortConfig.direction === 'asc' ? <ArrowUp size={12}/> : <ArrowDown size={12}/>)}</div>
+                  <div className="flex items-center justify-end gap-2">Cost (INR) {sortConfig.key === 'cost_usd' && (sortConfig.direction === 'asc' ? <ArrowUp size={12}/> : <ArrowDown size={12}/>)}</div>
                 </th>
                 <th className="p-4 text-xs tracking-wider text-text-secondary font-bold uppercase text-center">Anomaly</th>
               </tr>
@@ -221,7 +223,7 @@ export default function CostExplorer() {
                     <td className="p-4 text-sm text-text-secondary">
                       {row.account_name || (filters.accountId ? accounts.find(a=>a.id === filters.accountId)?.account_name : "All Evaluated")}
                     </td>
-                    <td className="p-4 text-sm font-mono font-bold text-white text-right">${row.cost_usd.toFixed(2)}</td>
+                    <td className="p-4 text-sm font-mono font-bold text-white text-right">{formatINR(row.cost_usd)}</td>
                     <td className="p-4 text-center items-center justify-center">
                       {row.is_anomaly ? <span className="inline-block w-2.5 h-2.5 bg-accent-red rounded-full shadow-[0_0_8px_#FF4A6A] animate-pulse"></span> : <span className="inline-block w-2 H-2 bg-white/10 rounded-full"></span>}
                     </td>

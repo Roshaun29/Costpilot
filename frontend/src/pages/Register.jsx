@@ -34,6 +34,7 @@ export default function Register() {
       return setError('Passwords do not match');
     }
     
+    if (loading) return;
     setLoading(true);
     setError('');
     

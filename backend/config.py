@@ -1,33 +1,20 @@
 from pydantic_settings import BaseSettings
-from pydantic import Field
-from typing import Optional
-
 
 class Settings(BaseSettings):
-    # MongoDB
-    mongodb_url: str = Field(default="mongodb://localhost:27017/costpilot", env="MONGODB_URL")
-    db_name: str = "costpilot"
+    DATABASE_URL: str = "mysql+aiomysql://costpilot_user:costpilot_pass_2024@localhost:3306/costpilot"
+    JWT_SECRET: str = "change-this-in-production"
+    JWT_ALGORITHM: str = "HS256"
+    JWT_EXPIRE_MINUTES: int = 1440
+    TWILIO_ACCOUNT_SID: str = ""
+    TWILIO_AUTH_TOKEN: str = ""
+    TWILIO_FROM_NUMBER: str = ""
+    SMTP_HOST: str = "smtp.gmail.com"
+    SMTP_PORT: int = 587
+    SMTP_USER: str = ""
+    SMTP_PASSWORD: str = ""
+    SMTP_FROM_NAME: str = "CostPilot Alerts"
+    SIMULATION_TICK_INTERVAL_SECONDS: int = 30
 
-    # JWT
-    jwt_secret: str = Field(default="your-super-secret-key-change-this", env="JWT_SECRET")
-    jwt_algorithm: str = Field(default="HS256", env="JWT_ALGORITHM")
-    jwt_expire_minutes: int = Field(default=1440, env="JWT_EXPIRE_MINUTES")
-
-    # Twilio
-    twilio_account_sid: Optional[str] = Field(default=None, env="TWILIO_ACCOUNT_SID")
-    twilio_auth_token: Optional[str] = Field(default=None, env="TWILIO_AUTH_TOKEN")
-    twilio_from_number: Optional[str] = Field(default=None, env="TWILIO_FROM_NUMBER")
-
-    # Simulation
-    simulation_tick_interval_seconds: int = Field(
-        default=30, env="SIMULATION_TICK_INTERVAL_SECONDS"
-    )
-
-    class Config:
-        env_file = ".env"
-        env_file_encoding = "utf-8"
-        case_sensitive = False
-        extra = "ignore"
-
+    model_config = {"env_file": ".env", "case_sensitive": False, "extra": "ignore"}
 
 settings = Settings()

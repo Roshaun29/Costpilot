@@ -1,63 +1,32 @@
-from pydantic import BaseModel, Field, ConfigDict, GetJsonSchemaHandler
-from pydantic_core import core_schema
-from typing import Optional, Annotated, Any, Literal
+from sqlalchemy import String, Boolean, Text, DateTime
+from sqlalchemy.orm import Mapped, mapped_column
 from datetime import datetime
-from enum import Enum
-from bson import ObjectId
+from typing import Optional
+from db.mysql import Base
+from .base import new_uuid
+from pydantic import BaseModel
 
-class PyObjectId(ObjectId):
-    @classmethod
-    def __get_pydantic_core_schema__(cls, _source_type: Any, _handler: GetJsonSchemaHandler) -> core_schema.CoreSchema:
-        return core_schema.json_or_python_schema(
-            json_schema=core_schema.str_schema(),
-            python_schema=core_schema.union_schema([
-                core_schema.is_instance_schema(ObjectId),
-                core_schema.chain_schema([
-                    core_schema.str_schema(),
-                    core_schema.no_info_plain_validator_function(cls.validate),
-                ])
-            ]),
-            serialization=core_schema.plain_serializer_function_ser_schema(str),
-        )
-    @classmethod
-    def validate(cls, v: Any) -> ObjectId:
-        if not ObjectId.is_valid(v):
-            raise ValueError("Invalid ObjectId")
-        return ObjectId(v)
+class Alert(Base):
+    __tablename__ = "alerts"
+    
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=new_uuid)
+    user_id: Mapped[str] = mapped_column(String(36), nullable=False)
+    anomaly_id: Mapped[Optional[str]] = mapped_column(String(36))
+    account_id: Mapped[Optional[str]] = mapped_column(String(36))
+    channel: Mapped[str] = mapped_column(String(20), nullable=False)
+    status: Mapped[str] = mapped_column(String(20), default="pending")
+    message: Mapped[str] = mapped_column(Text, nullable=False)
+    error_detail: Mapped[Optional[str]] = mapped_column(Text)
+    is_read: Mapped[bool] = mapped_column(Boolean, default=False)
+    sent_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
 
-class AlertChannelEnum(str, Enum):
-    email = "email"
-    sms = "sms"
-    in_app = "in_app"
-
-class AlertStatusEnum(str, Enum):
-    sent = "sent"
-    failed = "failed"
-    pending = "pending"
-
-class AlertBase(BaseModel):
-    user_id: PyObjectId
-    anomaly_id: PyObjectId
-    account_id: PyObjectId
-    channel: AlertChannelEnum
-    status: AlertStatusEnum
+class AlertResponse(BaseModel):
+    id: str
+    user_id: str
+    anomaly_id: Optional[str]
+    channel: str
+    status: str
     message: str
+    is_read: bool
     sent_at: datetime
-    read: bool = False
-
-class AlertResponse(AlertBase):
-    id: Annotated[PyObjectId, Field(alias="_id", default_factory=PyObjectId)]
-
-    model_config = ConfigDict(
-        arbitrary_types_allowed=True,
-        populate_by_name=True
-    )
-
-class AlertInDB(AlertBase):
-    id: Annotated[PyObjectId, Field(alias="_id", default_factory=PyObjectId)]
-    created_at: datetime = Field(default_factory=datetime.utcnow)
-
-    model_config = ConfigDict(
-        arbitrary_types_allowed=True,
-        populate_by_name=True
-    )
+    model_config = {"from_attributes": True}

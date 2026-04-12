@@ -1,35 +1,87 @@
-version: '3.8'
+version: "3.9"
 
 services:
+
+  mysql:
+    image: mysql:8.0
+    container_name: costpilot_mysql
+    restart: unless-stopped
+    environment:
+      MYSQL_ROOT_PASSWORD: costpilot_root_2024
+      MYSQL_DATABASE: costpilot
+      MYSQL_USER: costpilot_user
+      MYSQL_PASSWORD: costpilot_pass_2024
+    ports:
+      - "3306:3306"
+    volumes:
+      - mysql_data:/var/lib/mysql
+      - ./backend/db/init.sql:/docker-entrypoint-initdb.d/init.sql
+    healthcheck:
+      test: ["CMD", "mysqladmin", "ping", "-h", "localhost", "-u", "costpilot_user", "-pcostpilot_pass_2024"]
+      interval: 5s
+      timeout: 10s
+      retries: 10
+      start_period: 30s
+    networks:
+      - costpilot_net
+
   backend:
     build:
-      context: .
-      dockerfile: backend/Dockerfile
+      context: ./backend
+      dockerfile: Dockerfile
+    container_name: costpilot_backend
+    restart: unless-stopped
+    depends_on:
+      mysql:
+        condition: service_healthy
+    environment:
+      DATABASE_URL: mysql+aiomysql://costpilot_user:costpilot_pass_2024@mysql:3306/costpilot
+      JWT_SECRET: costpilot-jwt-secret-change-in-production
+      JWT_ALGORITHM: HS256
+      JWT_EXPIRE_MINUTES: 1440
+      TWILIO_ACCOUNT_SID: ""
+      TWILIO_AUTH_TOKEN: ""
+      TWILIO_FROM_NUMBER: ""
+      SMTP_HOST: smtp.gmail.com
+      SMTP_PORT: "587"
+      SMTP_USER: ""
+      SMTP_PASSWORD: ""
+      SMTP_FROM_NAME: CostPilot Alerts
+      SIMULATION_TICK_INTERVAL_SECONDS: "30"
     ports:
       - "8000:8000"
-    depends_on:
-      - mongo
-    env_file:
-      - .env
-    restart: unless-stopped
+    volumes:
+      - ./backend:/app
+    networks:
+      - costpilot_net
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/api/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 15s
 
   frontend:
     build:
-      context: .
-      dockerfile: frontend/Dockerfile
+      context: ./frontend
+      dockerfile: Dockerfile
+    container_name: costpilot_frontend
+    restart: unless-stopped
+    depends_on:
+      backend:
+        condition: service_healthy
+    environment:
+      VITE_API_URL: http://localhost:8000
+      VITE_WS_URL: ws://localhost:8000
     ports:
       - "5173:5173"
-    depends_on:
-      - backend
-    restart: unless-stopped
-
-  mongo:
-    image: mongo:latest
-    ports:
-      - "27017:27017"
-    volumes:
-      - mongo_data:/data/db
-    restart: unless-stopped
+    networks:
+      - costpilot_net
 
 volumes:
-  mongo_data:
+  mysql_data:
+    driver: local
+
+networks:
+  costpilot_net:
+    driver: bridge

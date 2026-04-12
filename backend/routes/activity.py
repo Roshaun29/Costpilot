@@ -1,46 +1,66 @@
 from fastapi import APIRouter, Depends, Query, HTTPException, status
-from typing import Optional
+from typing import Optional, List
 from datetime import datetime
+from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy import select, func, desc
 
-from backend.db.mongodb import get_db
-from backend.utils.jwt_utils import get_current_user
-from backend.utils.response import paginated_response
+from db.mysql import get_db
+from models.activity_log import ActivityLog, ActivityLogResponse
+from models.user import User
+from utils.jwt_utils import get_current_user
+from utils.response import paginated_response
 
 router = APIRouter(tags=["activity"])
 
-@router.get("")
+@router.get("", response_model=None)
 async def get_activity(
     entity_type: Optional[str] = None,
     start_date: Optional[str] = None,
     end_date: Optional[str] = None,
     page: int = Query(1, ge=1),
     limit: int = Query(20, ge=1),
-    current_user: dict = Depends(get_current_user),
-    db = Depends(get_db)
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db)
 ):
-    uid = current_user["_id"]
-    match_q = {"user_id": uid}
+    uid = current_user.id
+    stmt = select(ActivityLog).where(ActivityLog.user_id == uid)
     
-    if entity_type: match_q["entity_type"] = entity_type
+    if entity_type: 
+        stmt = stmt.where(ActivityLog.entity_type == entity_type)
+        
     if start_date and end_date:
         try:
-            match_q["timestamp"] = {
-                "$gte": datetime.strptime(start_date, "%Y-%m-%d"),
-                "$lte": datetime.strptime(end_date, "%Y-%m-%d").replace(hour=23, minute=59, second=59)
-            }
+            sd = datetime.strptime(start_date, "%Y-%m-%d")
+            ed = datetime.strptime(end_date, "%Y-%m-%d").replace(hour=23, minute=59, second=59)
+            stmt = stmt.where(ActivityLog.created_at >= sd, ActivityLog.created_at <= ed)
         except ValueError:
             pass
             
-    skip = (page - 1) * limit
-    cursor = db.activity_logs.find(match_q).sort("timestamp", -1).skip(skip).limit(limit)
-    items = await cursor.to_list(None)
-    total = await db.activity_logs.count_documents(match_q)
+    # Pagination
+    offset = (page - 1) * limit
     
+    # Total count
+    count_stmt = select(func.count()).select_from(stmt.subquery())
+    total_res = await db.execute(count_stmt)
+    total = total_res.scalar() or 0
+    
+    # Fetch items
+    res = await db.execute(stmt.order_by(desc(ActivityLog.created_at)).offset(offset).limit(limit))
+    items = res.scalars().all()
+    
+    # Map to frontend expectations
+    results = []
     for item in items:
-        item["id"] = str(item.pop("_id"))
-        item["user_id"] = str(item["user_id"])
-        # Map fields to frontend expectations
-        item["details"] = item.pop("metadata", {})
-        item["actor"] = {"ip": item.get("ip_address") or "0.0.0.0", "role": "user"}
+        results.append({
+            "id": item.id,
+            "user_id": item.user_id,
+            "action": item.action,
+            "entity_type": item.entity_type,
+            "entity_id": item.entity_id,
+            "details": item.meta_data or {},
+            "ip_address": item.ip_address,
+            "timestamp": item.created_at,
+            "actor": {"ip": item.ip_address or "0.0.0.0", "role": "user"}
+        })
         
-    return paginated_response(items, total, page, limit)
+    return paginated_response(results, total, page, limit)

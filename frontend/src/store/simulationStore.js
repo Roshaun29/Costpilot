@@ -75,13 +75,14 @@ export const useSimulationStore = create((set, get) => ({
     const state = get();
     try {
       if (state.isRunning) {
-        const res = await stopSimulation();
-        get().setStatus(res.data.data);
+        await stopSimulation();
+        toast.success('⏹ Simulation stopped');
       } else {
-        const res = await startSimulation();
-        get().setStatus(res.data.data);
-        toast.success('▶ Simulation resumed');
+        await startSimulation();
+        toast.success('▶ Simulation started');
       }
+      // Refresh status from server after toggle
+      await get().fetchStatus();
     } catch (err) {
       toast.error('Failed to toggle simulation status');
     }

@@ -1,120 +1,101 @@
 from fastapi import APIRouter, Depends, HTTPException, status
-from pydantic import BaseModel
-from typing import Optional
+from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy import select, delete
+from db.mysql import get_db
+from models.cloud_account import CloudAccount, CloudAccountCreate, CloudAccountResponse
+from models.user import User
+from utils.jwt_utils import get_current_user
+from typing import List
+from sqlalchemy.exc import IntegrityError
 from datetime import datetime
+from services.simulation_engine import SimulationEngine
+from services.live_simulator import live_simulator
 import uuid
-import random
-from bson import ObjectId
 
-from backend.db.mongodb import get_db
-from backend.utils.jwt_utils import get_current_user
-from backend.utils.response import success_response, error_response
-from backend.utils.logger import log_activity
-from backend.models.cloud_account import CloudAccountCreate, CloudAccountUpdate, ProviderEnum
-from backend.services.simulation_engine import SimulationEngine
-from backend.services.anomaly_detector import AnomalyDetector
-
-router = APIRouter(tags=["cloud-accounts"])
+router = APIRouter()
 
 @router.get("")
-async def get_accounts(current_user: dict = Depends(get_current_user), db = Depends(get_db)):
-    uid = current_user["_id"]
-    cursor = db.cloud_accounts.find({"user_id": uid})
-    accounts = await cursor.to_list(length=None)
-    for a in accounts:
-        a["id"] = str(a.pop("_id"))
-        a["user_id"] = str(a["user_id"])
-    return success_response(accounts)
+async def list_accounts(current_user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db)):
+    result = await db.execute(select(CloudAccount).where(CloudAccount.user_id == current_user.id))
+    accounts = result.scalars().all()
+    return {"success": True, "data": [CloudAccountResponse.model_validate(a) for a in accounts]}
 
 @router.post("")
-async def create_account(acc: CloudAccountCreate, current_user: dict = Depends(get_current_user), db = Depends(get_db)):
-    uid = current_user["_id"]
-    
-    if acc.provider == ProviderEnum.aws:
-        sim_id = str(random.randint(100000000000, 999999999999))
-    else:
-        sim_id = str(uuid.uuid4())
+async def create_account(data: CloudAccountCreate, db: AsyncSession = Depends(get_db), user: User = Depends(get_current_user)):
+    try:
+        sim_acc_id = f"{data.provider.lower()}-{uuid.uuid4().hex[:12]}"
         
-    doc = acc.model_dump()
-    doc["user_id"] = uid
-    doc["account_id_simulated"] = sim_id
-    doc["sync_status"] = "idle"
-    doc["last_synced_at"] = None
-    doc["created_at"] = datetime.utcnow()
-    
-    res = await db.cloud_accounts.insert_one(doc)
-    doc["id"] = str(res.inserted_id)
-    doc.pop("_id")
-    doc["user_id"] = str(uid)
-    
-    await SimulationEngine.generate_historical_data(doc["id"], str(uid), acc.provider.value, db)
-    
-    await db.cloud_accounts.update_one(
-        {"_id": res.inserted_id},
-        {"$set": {"sync_status": "synced", "last_synced_at": datetime.utcnow()}}
-    )
-    doc["sync_status"] = "synced"
-    doc["last_synced_at"] = datetime.utcnow()
-    
-    await log_activity(db, str(uid), "account_added", "cloud_account", doc["id"])
-    return success_response(doc, "Account created", status.HTTP_201_CREATED)
-
-@router.put("/{id}")
-async def update_account(id: str, updates: CloudAccountUpdate, current_user: dict = Depends(get_current_user), db = Depends(get_db)):
-    uid = current_user["_id"]
-    
-    update_data = {k: v for k, v in updates.model_dump().items() if v is not None}
-    if not update_data:
-        return error_response("No fields to update")
+        account = CloudAccount(
+            user_id=user.id,
+            provider=data.provider,
+            account_name=data.account_name,
+            region=data.region,
+            monthly_budget=data.monthly_budget,
+            account_id_simulated=sim_acc_id,
+            sync_status="syncing"
+        )
+        db.add(account)
+        await db.commit()
+        await db.refresh(account)
         
-    res = await db.cloud_accounts.find_one_and_update(
-        {"_id": ObjectId(id), "user_id": uid},
-        {"$set": update_data},
-        return_document=True
-    )
-    if not res:
-        return error_response("Account not found", status.HTTP_404_NOT_FOUND)
+        # Generate historical data (90 days)
+        await SimulationEngine.generate_historical_data(
+            account.id, user.id, data.provider, db
+        )
         
-    res["id"] = str(res.pop("_id"))
-    res["user_id"] = str(res["user_id"])
-    
-    await log_activity(db, str(uid), "account_updated", "cloud_account", id, {"fields": list(update_data.keys())})
-    return success_response(res, "Account updated")
-
-@router.delete("/{id}")
-async def delete_account(id: str, current_user: dict = Depends(get_current_user), db = Depends(get_db)):
-    uid = current_user["_id"]
-    acc = await db.cloud_accounts.find_one({"_id": ObjectId(id), "user_id": uid})
-    if not acc:
-        return error_response("Account not found", status.HTTP_404_NOT_FOUND)
+        # Update sync status
+        account.sync_status = "synced"
+        account.last_synced_at = datetime.utcnow()
+        await db.commit()
         
-    await db.cloud_accounts.delete_one({"_id": ObjectId(id)})
-    await db.cost_data.delete_many({"account_id": ObjectId(id)})
-    await db.anomalies.delete_many({"account_id": ObjectId(id)})
-    
-    await log_activity(db, str(uid), "account_deleted", "cloud_account", id)
-    return success_response(None, "Account deleted")
+        # Initialize live simulator
+        live_simulator.initialize_account(account.id, data.provider)
+        
+        return {"success": True, "data": CloudAccountResponse.model_validate(account)}
+    except IntegrityError as e:
+        await db.rollback()
+        raise HTTPException(status_code=400, detail=f"Account creation failed: {str(e)}")
+    except Exception as e:
+        await db.rollback()
+        raise HTTPException(status_code=500, detail=f"Unexpected error: {str(e)}")
 
 @router.post("/{id}/sync")
-async def sync_account(id: str, current_user: dict = Depends(get_current_user), db = Depends(get_db)):
-    uid = current_user["_id"]
-    acc = await db.cloud_accounts.find_one({"_id": ObjectId(id), "user_id": uid})
-    if not acc:
-        return error_response("Account not found", status.HTTP_404_NOT_FOUND)
+async def sync_account(id: str, current_user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db)):
+    """Trigger a re-sync (regenerate historical data) for an existing account."""
+    result = await db.execute(select(CloudAccount).where(CloudAccount.id == id, CloudAccount.user_id == current_user.id))
+    account = result.scalar_one_or_none()
+    if not account:
+        raise HTTPException(status_code=404, detail="Cloud account not found")
+    
+    try:
+        account.sync_status = "syncing"
+        await db.commit()
         
-    await db.cloud_accounts.update_one({"_id": ObjectId(id)}, {"$set": {"sync_status": "syncing"}})
-    
-    docs = await SimulationEngine.generate_daily_tick(id, str(uid), acc["provider"], db)
-    anoms = await AnomalyDetector.detect_anomalies_for_account(id, str(uid), db)
-    
-    await db.cloud_accounts.update_one(
-        {"_id": ObjectId(id)},
-        {"$set": {"sync_status": "synced", "last_synced_at": datetime.utcnow()}}
-    )
-    
-    await log_activity(db, str(uid), "manual_sync", "cloud_account", id)
-    return success_response({
-        "sync_status": "synced",
-        "new_data_points": len(docs),
-        "anomalies_detected": len(anoms)
-    }, "Account synced")
+        await SimulationEngine.generate_historical_data(account.id, current_user.id, account.provider, db)
+        
+        account.sync_status = "synced"
+        account.last_synced_at = datetime.utcnow()
+        await db.commit()
+        await db.refresh(account)
+        
+        live_simulator.initialize_account(account.id, account.provider)
+        return {"success": True, "data": CloudAccountResponse.model_validate(account)}
+    except Exception as e:
+        await db.rollback()
+        raise HTTPException(status_code=500, detail=f"Sync failed: {str(e)}")
+
+@router.post("/connect-real")
+async def connect_real_account(data: dict, current_user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db)):
+    """Stub for connecting a real cloud account (AWS SDK, etc.). Returns simulated for now."""
+    raise HTTPException(status_code=501, detail="Real cloud account connection is not yet implemented. Use simulated accounts.")
+
+@router.delete("/{id}", status_code=status.HTTP_204_NO_CONTENT)
+async def delete_account(id: str, current_user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db)):
+    result = await db.execute(select(CloudAccount).where(CloudAccount.id == id, CloudAccount.user_id == current_user.id))
+    acc = result.scalar_one_or_none()
+    if not acc:
+        raise HTTPException(status_code=404, detail="Cloud account not found")
+        
+    await db.delete(acc)
+    await db.commit()
+    return None

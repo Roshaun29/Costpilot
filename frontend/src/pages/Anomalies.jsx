@@ -14,6 +14,7 @@ import CostLineChart from '../components/charts/CostLineChart';
 
 import { getAnomalies, getAnomalyStats, getAnomaly, updateAnomalyStatus } from '../api/anomalies';
 import { getAccounts } from '../api/accounts';
+import { formatINR } from '../utils/currency';
 
 const SEVERITY_COLORS = { low: '#4AFFD4', medium: '#FFB84A', high: '#FF8A4A', critical: '#FF4A6A' };
 
@@ -82,6 +83,7 @@ export default function Anomalies() {
   };
 
   const handleStatusUpdate = async (id, statusToSet, customNotes = null) => {
+    if (statusLoading) return;
     setStatusLoading(true);
     try {
       await updateAnomalyStatus(id, { status: statusToSet, notes: customNotes !== null ? customNotes : notes });
@@ -181,9 +183,9 @@ export default function Anomalies() {
 
                 <div className="flex items-center gap-8 md:gap-12 w-full md:w-auto">
                   <div>
-                    <p className="text-xs text-text-secondary mb-1">Expected: ${Number(anom.expected_cost).toFixed(2)}</p>
+                    <p className="text-xs text-text-secondary mb-1">Expected: {formatINR(anom.expected_cost)}</p>
                     <div className="flex items-center gap-2">
-                      <span className="font-mono text-lg font-bold text-white">${Number(anom.actual_cost).toFixed(2)}</span>
+                      <span className="font-mono text-lg font-bold text-white">{formatINR(anom.actual_cost)}</span>
                       <span className="text-xs font-mono font-bold px-1.5 py-0.5 rounded border" style={{ color: SEVERITY_COLORS[anom.severity], backgroundColor: `${SEVERITY_COLORS[anom.severity]}15`, borderColor: `${SEVERITY_COLORS[anom.severity]}30` }}>
                         +{Number(anom.deviation_percent).toFixed(1)}%
                       </span>
@@ -245,7 +247,7 @@ export default function Anomalies() {
             <div>
               <p className="text-sm leading-relaxed text-text-secondary bg-surface p-4 rounded-xl border border-white/5 border-l-2 border-l-brand">
                 This anomaly was detected using <strong className="text-white">{selectedAnomaly.detection_method.replace('_', ' ').toUpperCase()}</strong>. 
-                The cost was {Number(selectedAnomaly.deviation_percent).toFixed(1)}% above the rolling statistical baseline expectation (${Number(selectedAnomaly.expected_cost).toFixed(2)} expected vs ${Number(selectedAnomaly.actual_cost).toFixed(2)} actual).
+                The cost was {Number(selectedAnomaly.deviation_percent).toFixed(1)}% above the rolling statistical baseline expectation ({formatINR(selectedAnomaly.expected_cost)} expected vs {formatINR(selectedAnomaly.actual_cost)} actual).
               </p>
             </div>
 

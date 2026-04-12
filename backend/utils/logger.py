@@ -2,7 +2,7 @@ import logging
 import sys
 from datetime import datetime
 from typing import Any, Dict, Optional
-from bson import ObjectId
+from models.activity_log import ActivityLog
 
 # Standard Python logging setup
 logging.basicConfig(
@@ -14,26 +14,27 @@ logging.basicConfig(
 logger = logging.getLogger("costpilot")
 
 async def log_activity(
-    db,
+    session,
     user_id: str,
     action: str,
     entity_type: str,
     entity_id: str,
-    metadata: Optional[Dict[str, Any]] = None,
+    meta_data: Optional[Dict[str, Any]] = None,
     ip: Optional[str] = None
 ):
-    """Async activity logger that writes to MongoDB."""
-    log_entry = {
-        "user_id": ObjectId(user_id),
-        "action": action,
-        "entity_type": entity_type,
-        "entity_id": entity_id,
-        "metadata": metadata or {},
-        "ip_address": ip,
-        "timestamp": datetime.utcnow()
-    }
+    """Async activity logger that writes to MySQL via SQLAlchemy."""
     try:
-        await db.activity_logs.insert_one(log_entry)
+        new_log = ActivityLog(
+            user_id=user_id,
+            action=action,
+            entity_type=entity_type,
+            entity_id=entity_id,
+            meta_data=meta_data or {},
+            ip_address=ip,
+            created_at=datetime.utcnow()
+        )
+        session.add(new_log)
+        await session.commit()
         logger.info(f"Activity logged: {action} on {entity_type}:{entity_id} by user {user_id}")
     except Exception as e:
         logger.error(f"Failed to log activity: {e}")

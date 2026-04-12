@@ -1,55 +1,32 @@
-from pydantic import BaseModel, Field, ConfigDict, GetJsonSchemaHandler
-from pydantic_core import core_schema
-from typing import Optional, Annotated, Any, Dict
-from datetime import datetime
-from bson import ObjectId
+from sqlalchemy import String, Boolean, Float, Date, DateTime
+from sqlalchemy.orm import Mapped, mapped_column
+from datetime import datetime, date
+from typing import Optional
+from db.mysql import Base
+from .base import new_uuid
+from pydantic import BaseModel
 
-class PyObjectId(ObjectId):
-    @classmethod
-    def __get_pydantic_core_schema__(cls, _source_type: Any, _handler: GetJsonSchemaHandler) -> core_schema.CoreSchema:
-        return core_schema.json_or_python_schema(
-            json_schema=core_schema.str_schema(),
-            python_schema=core_schema.union_schema([
-                core_schema.is_instance_schema(ObjectId),
-                core_schema.chain_schema([
-                    core_schema.str_schema(),
-                    core_schema.no_info_plain_validator_function(cls.validate),
-                ])
-            ]),
-            serialization=core_schema.plain_serializer_function_ser_schema(str),
-        )
-    @classmethod
-    def validate(cls, v: Any) -> ObjectId:
-        if not ObjectId.is_valid(v):
-            raise ValueError("Invalid ObjectId")
-        return ObjectId(v)
+class CostData(Base):
+    __tablename__ = "cost_data"
+    
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=new_uuid)
+    account_id: Mapped[str] = mapped_column(String(36), nullable=False)
+    user_id: Mapped[str] = mapped_column(String(36), nullable=False)
+    cost_date: Mapped[date] = mapped_column(Date, nullable=False)
+    service: Mapped[str] = mapped_column(String(100), nullable=False)
+    region: Mapped[Optional[str]] = mapped_column(String(100))
+    cost_usd: Mapped[float] = mapped_column(Float, default=0.0)
+    usage_quantity: Mapped[Optional[float]] = mapped_column(Float)
+    usage_unit: Mapped[Optional[str]] = mapped_column(String(50))
+    is_anomaly: Mapped[bool] = mapped_column(Boolean, default=False)
+    is_real: Mapped[bool] = mapped_column(Boolean, default=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
 
-class CostDataBase(BaseModel):
-    account_id: PyObjectId
-    user_id: PyObjectId
-    date: datetime
+class CostDataResponse(BaseModel):
+    id: str
+    account_id: str
+    cost_date: date
     service: str
-    region: str
     cost_usd: float
-    usage_quantity: float
-    usage_unit: str
-    tags: Dict[str, str] = Field(default_factory=dict)
-    is_anomaly: bool = False
-
-class CostDataResponse(CostDataBase):
-    id: Annotated[PyObjectId, Field(alias="_id", default_factory=PyObjectId)]
-    created_at: datetime
-
-    model_config = ConfigDict(
-        arbitrary_types_allowed=True,
-        populate_by_name=True
-    )
-
-class CostDataInDB(CostDataBase):
-    id: Annotated[PyObjectId, Field(alias="_id", default_factory=PyObjectId)]
-    created_at: datetime = Field(default_factory=datetime.utcnow)
-
-    model_config = ConfigDict(
-        arbitrary_types_allowed=True,
-        populate_by_name=True
-    )
+    is_anomaly: bool
+    model_config = {"from_attributes": True}

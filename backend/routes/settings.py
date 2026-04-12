@@ -1,118 +1,98 @@
 from fastapi import APIRouter, Depends, HTTPException, status
 from pydantic import BaseModel
+from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy import select, update
 import re
 from datetime import datetime
-from bson import ObjectId
+from typing import Optional
 
-from backend.db.mongodb import get_db
-from backend.utils.jwt_utils import get_current_user
-from backend.utils.response import success_response, error_response
-from backend.utils.logger import log_activity
-from backend.services.auth_service import hash_password, verify_password
-from backend.config import settings
+from db.mysql import get_db
+from utils.jwt_utils import get_current_user, hash_password, verify_password
+from utils.response import success_response, error_response
+from utils.logger import log_activity
+from models.user import User
 
 router = APIRouter(tags=["settings"])
-
 
 class NotificationPrefs(BaseModel):
     email: bool
     sms: bool
     in_app: bool
 
-
 class SettingsUpdate(BaseModel):
-    phone_number: str | None = None
-    notification_prefs: NotificationPrefs | None = None
-    alert_threshold_percent: int | None = None
+    phone_number: Optional[str] = None
+    notif_email: Optional[bool] = None
+    notif_sms: Optional[bool] = None
+    notif_in_app: Optional[bool] = None
+    alert_threshold_percent: Optional[int] = None
 
+class PasswordChange(BaseModel):
+    current_password: str
+    new_password: str
 
 @router.get("")
-async def get_settings(current_user: dict = Depends(get_current_user)):
+async def get_current_settings(current_user: User = Depends(get_current_user)):
     return success_response({
-        "phone_number": current_user.get("phone_number"),
-        "notification_prefs": current_user.get("notification_prefs"),
-        "alert_threshold_percent": current_user.get("alert_threshold_percent", 25)
+        "phone_number": current_user.phone_number,
+        "notification_prefs": {
+            "email": current_user.notif_email,
+            "sms": current_user.notif_sms,
+            "in_app": current_user.notif_in_app
+        },
+        "alert_threshold_percent": current_user.alert_threshold_percent,
+        "full_name": current_user.full_name,
+        "email": current_user.email
     })
 
-
 @router.put("")
-async def update_settings(
+async def update_current_settings(
     updates: SettingsUpdate,
-    current_user: dict = Depends(get_current_user),
-    db=Depends(get_db)
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db)
 ):
-    uid = current_user["_id"]
-
     if updates.phone_number:
         if not re.match(r"^\+[1-9]\d{7,14}$", updates.phone_number):
             return error_response("Phone number must be in E.164 format (e.g. +12025551234)", 400)
 
-    update_data = {k: v for k, v in updates.model_dump().items() if v is not None}
-    if not update_data:
-        return error_response("No fields to update")
+    # Manual mapping for clarity
+    if updates.phone_number is not None: current_user.phone_number = updates.phone_number
+    if updates.notif_email is not None: current_user.notif_email = updates.notif_email
+    if updates.notif_sms is not None: current_user.notif_sms = updates.notif_sms
+    if updates.notif_in_app is not None: current_user.notif_in_app = updates.notif_in_app
+    if updates.alert_threshold_percent is not None: current_user.alert_threshold_percent = updates.alert_threshold_percent
 
-    await db.users.update_one({"_id": uid}, {"$set": update_data})
-    await log_activity(db, str(uid), "settings_updated", "user", str(uid), {"fields": list(update_data.keys())})
-
+    db.add(current_user)
+    await db.commit()
+    
+    await log_activity(db, current_user.id, "settings_updated", "user", current_user.id)
     return success_response(None, "Settings updated")
 
-
-class PasswordUpdate(BaseModel):
-    current_password: str
-    new_password: str
-
-
 @router.put("/password")
-async def update_password(
-    payload: PasswordUpdate,
-    current_user: dict = Depends(get_current_user),
-    db=Depends(get_db)
+async def change_password(
+    body: PasswordChange,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db)
 ):
-    uid = current_user["_id"]
-    user = await db.users.find_one({"_id": uid})
-
-    if not verify_password(payload.current_password, user["hashed_password"]):
-        return error_response("Incorrect current password", 400)
-
-    if len(payload.new_password) < 8:
-        return error_response("New password must be at least 8 characters", 400)
-
-    new_hashed = hash_password(payload.new_password)
-    await db.users.update_one({"_id": uid}, {"$set": {"hashed_password": new_hashed}})
-    await log_activity(db, str(uid), "password_changed", "user", str(uid))
-
-    return success_response(None, "Password updated")
-
+    """Change account password - verifies current password first."""
+    if not verify_password(body.current_password, current_user.hashed_password):
+        raise HTTPException(status_code=400, detail="Current password is incorrect")
+    
+    if len(body.new_password) < 8:
+        raise HTTPException(status_code=400, detail="New password must be at least 8 characters")
+    
+    current_user.hashed_password = hash_password(body.new_password)
+    db.add(current_user)
+    await db.commit()
+    
+    await log_activity(db, current_user.id, "password_changed", "user", current_user.id)
+    return success_response(None, "Password changed successfully")
 
 @router.post("/test-alert")
-async def test_alert(current_user: dict = Depends(get_current_user), db=Depends(get_db)):
-    from backend.services.alert_service import send_test_alert
-
-    uid = current_user["_id"]
-
+async def test_alert(current_user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db)):
+    from services.alert_service import send_test_alert
+    
     try:
         result = await send_test_alert(current_user, db)
+        return success_response(result, "Test alert dispatched")
     except Exception as e:
         return error_response(f"Test alert failed: {str(e)}", 500)
-
-    channels_tested = []
-    results = {}
-
-    if result.get("in_app"):
-        channels_tested.append("in_app")
-        results["in_app"] = "success"
-
-    sms_val = result.get("sms", "skipped")
-    if sms_val != "skipped":
-        channels_tested.append("sms")
-        results["sms"] = sms_val
-
-    email_val = result.get("email", "skipped")
-    if email_val != "skipped":
-        channels_tested.append("email")
-        results["email"] = email_val
-
-    return success_response(
-        {"channels_tested": channels_tested, "results": results},
-        "Test alert dispatched"
-    )

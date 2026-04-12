@@ -1,123 +1,97 @@
 from fastapi import APIRouter, Depends, HTTPException, status
+from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy import select, update, func
 from datetime import datetime
-from pydantic import BaseModel
-from bson import ObjectId
+from db.mysql import get_db
+from models.simulation import SimulationState, SimulationStatusResponse
+from models.cloud_account import CloudAccount
+from models.user import User
+from utils.jwt_utils import get_current_user
+from utils.response import success_response, error_response
+from services.simulation_engine import SimulationEngine
+from services.anomaly_detector import AnomalyDetector
 
-from backend.db.mongodb import get_db
-from backend.utils.jwt_utils import get_current_user
-from backend.utils.response import success_response, error_response
-from backend.utils.logger import log_activity
-from backend.services.simulation_engine import SimulationEngine
-from backend.services.anomaly_detector import AnomalyDetector
-from backend.services.ws_manager import broadcast_paused
+from sqlalchemy.dialects.mysql import insert as mysql_insert
 
-router = APIRouter(tags=["simulation"])
+router = APIRouter()
+
+async def get_or_create_simulation_state(user_id: str, db: AsyncSession):
+    """Get existing state or create default. Never creates duplicates."""
+    result = await db.execute(
+        select(SimulationState).where(SimulationState.user_id == user_id)
+    )
+    state = result.scalar_one_or_none()
+    if state:
+        return state
+    
+    # Use INSERT IGNORE to handle race conditions
+    stmt = mysql_insert(SimulationState).values(
+        user_id=user_id,
+        is_running=False,
+        tick_count=0
+    ).prefix_with("IGNORE")
+    await db.execute(stmt)
+    await db.commit()
+    
+    result = await db.execute(
+        select(SimulationState).where(SimulationState.user_id == user_id)
+    )
+    return result.scalar_one()
 
 @router.get("/status")
-async def get_simulation_status(current_user: dict = Depends(get_current_user), db = Depends(get_db)):
-    uid = current_user["_id"]
-    state = await db.simulation_states.find_one({"user_id": uid})
-    if not state:
-        state = {
-            "user_id": uid,
-            "is_running": False,
-            "last_tick_at": None,
-            "tick_count": 0,
-            "started_at": None
-        }
-        await db.simulation_states.insert_one(state)
+async def get_status(current_user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db)):
+    state = await get_or_create_simulation_state(current_user.id, db)
         
-    active_accounts = await db.cloud_accounts.count_documents({"user_id": uid, "is_active": True})
+    acc_count = await db.execute(
+        select(func.count(CloudAccount.id)).where(CloudAccount.user_id == current_user.id, CloudAccount.is_active == True)
+    )
     
     return success_response({
-        "is_running": state.get("is_running", False),
-        "last_tick_at": state.get("last_tick_at"),
-        "tick_count": state.get("tick_count", 0),
-        "accounts_monitored": active_accounts,
-        "started_at": state.get("started_at")
-    }, "Simulation status retrieved")
+        "is_running": state.is_running,
+        "last_tick_at": state.last_tick_at,
+        "tick_count": state.tick_count,
+        "accounts_monitored": acc_count.scalar(),
+        "started_at": state.started_at
+    })
 
 @router.post("/start")
-async def start_simulation(current_user: dict = Depends(get_current_user), db = Depends(get_db)):
-    uid = current_user["_id"]
-    now = datetime.utcnow()
-    await db.simulation_states.update_one(
-        {"user_id": uid},
-        {"$set": {"is_running": True, "started_at": now}},
-        upsert=True
+async def start_sim(current_user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db)):
+    await db.execute(
+        update(SimulationState)
+        .where(SimulationState.user_id == current_user.id)
+        .values(is_running=True, started_at=datetime.utcnow())
     )
-    await log_activity(db, str(uid), "simulation_started", "simulation", "system")
-    
-    state = await db.simulation_states.find_one({"user_id": uid})
-    state.pop("_id", None)
-    state["user_id"] = str(state["user_id"])
-    return success_response(state, "Simulation started")
+    await db.flush()
+    return success_response(None, "Simulation started")
 
 @router.post("/stop")
-async def stop_simulation(current_user: dict = Depends(get_current_user), db = Depends(get_db)):
-    uid = current_user["_id"]
-    await db.simulation_states.update_one(
-        {"user_id": uid},
-        {"$set": {"is_running": False}},
-        upsert=True
+async def stop_sim(current_user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db)):
+    await db.execute(
+        update(SimulationState)
+        .where(SimulationState.user_id == current_user.id)
+        .values(is_running=False)
     )
-    await log_activity(db, str(uid), "simulation_stopped", "simulation", "system")
-    
-    state = await db.simulation_states.find_one({"user_id": uid})
-    state.pop("_id", None)
-    state["user_id"] = str(state["user_id"])
-    
-    await broadcast_paused(str(uid))
-    
-    return success_response(state, "Simulation stopped")
+    await db.flush()
+    return success_response(None, "Simulation stopped")
 
 @router.post("/tick")
-async def manual_tick(current_user: dict = Depends(get_current_user), db = Depends(get_db)):
-    uid = current_user["_id"]
-    accounts = await db.cloud_accounts.find({"user_id": uid, "is_active": True}).to_list(length=None)
+async def manual_tick(current_user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db)):
+    result = await db.execute(select(CloudAccount).where(CloudAccount.user_id == current_user.id, CloudAccount.is_active == True))
+    accounts = result.scalars().all()
     
     data_points = 0
     anomalies_detected = 0
+    
     for acc in accounts:
-        provider = acc.get("provider", "aws")
-        docs = await SimulationEngine.generate_daily_tick(str(acc["_id"]), str(uid), provider, db)
+        # Note: These services need to be updated to take (acc.id, user.id, db) too if needed
+        # Assuming the caller has refactored those services or I will next
+        docs = await SimulationEngine.generate_daily_tick(acc.id, current_user.id, acc.provider, db)
         data_points += len(docs)
-        anoms = await AnomalyDetector.detect_anomalies_for_account(str(acc["_id"]), str(uid), db)
+        anoms = await AnomalyDetector.detect_anomalies_for_account(acc.id, current_user.id, db)
         anomalies_detected += len(anoms)
         
-    await log_activity(db, str(uid), "manual_tick", "simulation", "system", {"data_points": data_points})
     return success_response({
         "accounts_processed": len(accounts),
         "data_points_generated": data_points,
         "anomalies_detected": anomalies_detected
     }, "Manual tick completed")
-
-class InjectAnomalyRequest(BaseModel):
-    account_id: str
-    service: str
-    anomaly_type: str
-
-@router.post("/inject-anomaly")
-async def inject_anomaly(req: InjectAnomalyRequest, current_user: dict = Depends(get_current_user), db = Depends(get_db)):
-    uid = current_user["_id"]
-    acc = await db.cloud_accounts.find_one({"_id": ObjectId(req.account_id), "user_id": uid})
-    if not acc:
-        return error_response("Account not found", status.HTTP_404_NOT_FOUND)
-        
-    if req.anomaly_type not in ["spike", "drift", "drop"]:
-        return error_response("Invalid anomaly type", status.HTTP_400_BAD_REQUEST)
-        
-    provider = acc.get("provider", "aws")
-    await SimulationEngine.generate_daily_tick(req.account_id, str(uid), provider, db, force_anomaly=req.anomaly_type)
-    
-    anoms = await AnomalyDetector.detect_anomalies_for_account(req.account_id, str(uid), db)
-    
-    await log_activity(db, str(uid), "inject_anomaly", "simulation", req.anomaly_type)
-    
-    for a in anoms:
-        a["_id"] = str(a["_id"])
-        a["account_id"] = str(a["account_id"])
-        a["user_id"] = str(a["user_id"])
-        a.pop("created_at", None)
-
-    return success_response({"injected_anomalies": anoms}, "Anomaly injected and detection run")

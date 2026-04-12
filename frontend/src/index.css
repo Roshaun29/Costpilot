@@ -16,30 +16,72 @@
   padding: 0;
 }
 
-:root {
-  color-scheme: dark;
+:root[data-theme="dark"] {
+  --bg-primary: #0A0A0B;
+  --bg-surface: #111114;
+  --bg-raised: #18181D;
+  --bg-overlay: #1E1E25;
+  --bg-hover: rgba(255,255,255,0.04);
+  --border-subtle: rgba(255,255,255,0.07);
+  --border-strong: rgba(255,255,255,0.15);
+  --text-primary: #F5F5F7;
+  --text-secondary: #8A8A9A;
+  --text-muted: #4A4A5A;
+  --brand: #B6FF4A;
+  --brand-muted: rgba(182,255,74,0.12);
+  --brand-text: #000000;
+  --accent-cyan: #4AFFD4;
+  --accent-red: #FF4A6A;
+  --accent-amber: #FFB84A;
+  --card-shadow: 0 4px 24px rgba(0,0,0,0.4);
+  --glass-bg: rgba(17,17,20,0.85);
+  --chart-grid: rgba(255,255,255,0.05);
+}
+
+:root[data-theme="light"] {
+  --bg-primary: #F0F2F5;
+  --bg-surface: #FFFFFF;
+  --bg-raised: #F8F9FA;
+  --bg-overlay: #ECEEF1;
+  --bg-hover: rgba(0,0,0,0.03);
+  --border-subtle: rgba(0,0,0,0.08);
+  --border-strong: rgba(0,0,0,0.18);
+  --text-primary: #0A0A0B;
+  --text-secondary: #5A5A6A;
+  --text-muted: #9A9AAA;
+  --brand: #5CA800;
+  --brand-muted: rgba(92,168,0,0.10);
+  --brand-text: #FFFFFF;
+  --accent-cyan: #0097A7;
+  --accent-red: #D32F2F;
+  --accent-amber: #E65100;
+  --card-shadow: 0 2px 12px rgba(0,0,0,0.08);
+  --glass-bg: rgba(255,255,255,0.9);
+  --chart-grid: rgba(0,0,0,0.06);
 }
 
 html {
   scroll-behavior: smooth;
+  transition: background-color 0.3s ease;
 }
 
 body {
-  background-color: #0A0A0B;
-  color: #F5F5F7;
+  background-color: var(--bg-primary);
+  color: var(--text-primary);
   font-family: 'DM Sans', system-ui, sans-serif;
   font-size: 15px;
   line-height: 1.6;
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
   overflow-x: hidden;
+  transition: background-color 0.3s ease, color 0.3s ease;
 }
 
 h1, h2, h3, h4, h5, h6 {
   font-family: 'Syne', system-ui, sans-serif;
   font-weight: 700;
   line-height: 1.2;
-  color: #F5F5F7;
+  color: var(--text-primary);
 }
 
 h1 { font-size: 2.25rem; }
@@ -47,15 +89,16 @@ h2 { font-size: 1.75rem; }
 h3 { font-size: 1.35rem; }
 
 p {
-  color: #8A8A9A;
+  color: var(--text-secondary);
 }
 
 a {
-  color: #B6FF4A;
+  color: var(--brand);
   text-decoration: none;
   transition: color 0.2s;
 }
-a:hover { color: #8FCC2A; }
+a:hover { opacity: 0.8; }
+
 
 /* --- Utility Classes ------------------------------ */
 .mono {
@@ -64,17 +107,17 @@ a:hover { color: #8FCC2A; }
 }
 
 .glass {
-  background: rgba(17, 17, 20, 0.8);
+  background: var(--glass-bg);
   backdrop-filter: blur(12px);
   -webkit-backdrop-filter: blur(12px);
-  border: 1px solid rgba(255, 255, 255, 0.07);
+  border: 1px solid var(--border-subtle);
 }
 
 .glass-raised {
-  background: rgba(24, 24, 29, 0.9);
+  background: var(--bg-surface);
   backdrop-filter: blur(16px);
   -webkit-backdrop-filter: blur(16px);
-  border: 1px solid rgba(255, 255, 255, 0.1);
+  border: 1px solid var(--border-strong);
 }
 
 /* --- Scrollbar ------------------------------------- */
@@ -83,14 +126,14 @@ a:hover { color: #8FCC2A; }
   height: 6px;
 }
 ::-webkit-scrollbar-track {
-  background: #0A0A0B;
+  background: var(--bg-primary);
 }
 ::-webkit-scrollbar-thumb {
-  background: #2A2A35;
+  background: var(--bg-overlay);
   border-radius: 9999px;
 }
 ::-webkit-scrollbar-thumb:hover {
-  background: #4A4A5A;
+  background: var(--text-muted);
 }
 
 /* --- Transitions ----------------------------------- */
@@ -100,23 +143,23 @@ a:hover { color: #8FCC2A; }
 
 /* --- Input base styling (used with @tailwindcss/forms) --- */
 input, textarea, select {
-  background-color: #18181D !important;
-  border-color: rgba(255, 255, 255, 0.08) !important;
-  color: #F5F5F7 !important;
+  background-color: var(--bg-raised) !important;
+  border-color: var(--border-subtle) !important;
+  color: var(--text-primary) !important;
   border-radius: 0.5rem !important;
 }
 input:focus, textarea:focus, select:focus {
   outline: none !important;
-  border-color: #B6FF4A !important;
-  box-shadow: 0 0 0 2px rgba(182, 255, 74, 0.15) !important;
+  border-color: var(--brand) !important;
+  box-shadow: 0 0 0 2px var(--brand-muted) !important;
 }
 input::placeholder, textarea::placeholder {
-  color: #4A4A5A !important;
+  color: var(--text-muted) !important;
 }
 
 /* --- Brand gradient -------------------------------- */
 .brand-gradient {
-  background: linear-gradient(135deg, #B6FF4A 0%, #4AFFD4 100%);
+  background: linear-gradient(135deg, var(--brand) 0%, var(--accent-cyan) 100%);
   -webkit-background-clip: text;
   -webkit-text-fill-color: transparent;
   background-clip: text;
@@ -128,14 +171,14 @@ input::placeholder, textarea::placeholder {
   100% { background-position: 200% 0; }
 }
 .shimmer {
-  background: linear-gradient(90deg, #18181D 25%, #202028 50%, #18181D 75%);
+  background: linear-gradient(90deg, var(--bg-raised) 25%, var(--bg-overlay) 50%, var(--bg-raised) 75%);
   background-size: 200% auto;
   animation: shimmer 1.5s infinite;
 }
 
 /* --- Glow effects ---------------------------------- */
 .glow-brand {
-  box-shadow: 0 0 20px rgba(182, 255, 74, 0.25);
+  box-shadow: 0 0 20px var(--brand-muted);
 }
 .glow-cyan {
   box-shadow: 0 0 20px rgba(74, 255, 212, 0.2);
@@ -145,18 +188,19 @@ input::placeholder, textarea::placeholder {
 }
 
 /* --- Severity colours ------------------------------ */
-.severity-low    { color: #4AFFD4; }
-.severity-medium { color: #FFB84A; }
+.severity-low    { color: var(--accent-cyan); }
+.severity-medium { color: var(--accent-amber); }
 .severity-high   { color: #FF8A4A; }
-.severity-critical { color: #FF4A6A; }
+.severity-critical { color: var(--accent-red); }
 
 /* --- Chart tooltip override ----------------------- */
 .recharts-tooltip-wrapper .recharts-default-tooltip {
-  background: #1E1E25 !important;
-  border: 1px solid rgba(255,255,255,0.08) !important;
+  background: var(--bg-overlay) !important;
+  border: 1px solid var(--border-subtle) !important;
   border-radius: 0.5rem !important;
-  color: #F5F5F7 !important;
+  color: var(--text-primary) !important;
 }
+
 
 /* --- Page transitions ------------------------------ */
 .page-enter { animation: slideUp 0.3s ease forwards; }

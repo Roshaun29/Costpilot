@@ -1,4 +1,4 @@
-from backend.routes import (
+from . import (
     auth,
     cloud_accounts,
     costs,
@@ -8,6 +8,7 @@ from backend.routes import (
     insights,
     activity,
     settings,
+    websocket,
 )
 
 __all__ = [
@@ -20,4 +21,5 @@ __all__ = [
     "insights",
     "activity",
     "settings",
+    "websocket",
 ]

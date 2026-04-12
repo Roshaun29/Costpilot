@@ -100,6 +100,7 @@ export default function Settings() {
 
   // --- PROFILE ---
   const handleProfileSave = async () => {
+    if (profileLoading) return;
     if (!name.trim()) return toast.error('Name cannot be empty');
     setProfileLoading(true);
     try {
@@ -132,6 +133,7 @@ export default function Settings() {
     if (calculatePwdStrength(pwd.new) < 2) return setPwdError('Password too weak. Mix uppercase, numbers, symbols.');
     if (pwd.new !== pwd.confirm) return setPwdError('Passwords do not match');
 
+    if (pwdLoading) return;
     setPwdLoading(true);
     try {
       await updatePassword({ current_password: pwd.current, new_password: pwd.new });
@@ -158,6 +160,7 @@ export default function Settings() {
     const err = validatePhone(phone);
     setPhoneError(err);
     if (err) return;
+    if (notifLoading) return;
     setNotifLoading(true);
     try {
       await updateSettings({ phone_number: phone });
@@ -202,6 +205,7 @@ export default function Settings() {
 
   // --- TEST ALERT ---
   const handleTestAlert = async () => {
+    if (testLoading) return;
     setTestLoading(true);
     setTestResult(null);
     try {
@@ -230,7 +234,7 @@ export default function Settings() {
       if (anoms.length > 0) {
         const a = anoms[0];
         toast.success(
-          `Anomaly injected! ${a.service}: $${Number(a.actual_cost).toFixed(2)} actual (+${Number(a.deviation_percent).toFixed(0)}%)`,
+          `Anomaly injected! ${a.service}: ${formatINR(a.actual_cost)} actual (+${Number(a.deviation_percent).toFixed(0)}%)`,
           { duration: 5000 }
         );
       } else {

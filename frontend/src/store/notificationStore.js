@@ -15,8 +15,8 @@ export const useNotificationStore = create((set, get) => ({
         getAlerts({ limit: 5 })
       ]);
       set({ 
-        unreadCount: countRes.data.data.count,
-        alerts: alertsRes.data.data
+        unreadCount: countRes.data?.count ?? 0,
+        alerts: alertsRes.data?.data?.items || alertsRes.data?.data || []
       });
     } catch (err) {}
   },

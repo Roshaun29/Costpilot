@@ -3,6 +3,7 @@ import { Routes, Route, Navigate } from 'react-router-dom';
 import { useAuthStore } from './store/authStore';
 import { useSimulationStore } from './store/simulationStore';
 import { useNotificationStore } from './store/notificationStore';
+import { useThemeStore } from './store/themeStore';
 
 import { useLiveData } from './hooks/useLiveData';
 import AnomalyToast from './components/live/AnomalyToast';
@@ -33,28 +34,31 @@ function PrivateRoute({ children }) {
 
 export default function App() {
   const [initing, setIniting] = useState(true);
+  const { initTheme } = useThemeStore();
   const { initialize, isAuthenticated } = useAuthStore();
   const { initializeSync } = useSimulationStore();
-  const { startPolling: startNotif, stopPolling: stopNotif } = useNotificationStore();
+  const { startPolling, stopPolling } = useNotificationStore();
   const { newAnomaly } = useLiveData();
 
   useEffect(() => {
-    initialize().finally(() => setIniting(false));
-  }, [initialize]);
+    initTheme();
+    initialize().catch(console.error).finally(() => setIniting(false));
+  }, [initialize, initTheme]);
 
   useEffect(() => {
     if (isAuthenticated) {
       initializeSync();
-      startNotif();
+      startPolling();
     } else {
-      stopNotif();
+      stopPolling();
     }
     return () => {
-      stopNotif();
+      stopPolling();
     };
-  }, [isAuthenticated, initializeSync, startNotif, stopNotif]);
+  }, [isAuthenticated, initializeSync, startPolling, stopPolling]);
 
   if (initing) return <PageLoader />;
+
 
   return (
   <>

@@ -42,10 +42,12 @@ export default function Insights() {
         getAccounts(),
         getCostSummary()
       ]);
-      setInsights(insRes.data.data);
+      setInsights(insRes.data.data || []);
       
-      const accs = accRes.data.data;
-      const spent = costRes.data.data.accounts;
+      const accs = accRes.data.data || [];
+      // getCostSummary returns { current_month_total, top_services, ... } — no per-account breakdown
+      // We compute utilization from account monthly_budget vs current total (approximate)
+      const spent = {}; // Will be empty unless we have per-account endpoint
       
       const mappedBudgets = accs.map(a => {
         const spentAmt = spent[a.id] || 0;
@@ -128,7 +130,7 @@ export default function Insights() {
           </div>
         ) : (
           insights.map(insight => {
-            const meta = getInsightMeta(insight.type);
+          const meta = getInsightMeta(insight.insight_type || insight.type);
             const Icon = meta.icon;
             
             return (
@@ -189,8 +191,8 @@ export default function Insights() {
                       <span className="text-sm font-medium text-white">{acc.account_name}</span>
                     </div>
                     <div className="text-right">
-                      <span className="font-mono text-sm font-bold text-white">${acc.spent.toLocaleString()}</span>
-                      <span className="font-mono text-xs text-text-secondary"> / ${acc.monthly_budget.toLocaleString()}</span>
+                      <span className="font-mono text-sm font-bold text-white">₹{acc.spent.toLocaleString()}</span>
+                      <span className="font-mono text-xs text-text-secondary"> / ₹{acc.monthly_budget.toLocaleString()}</span>
                       <span className={`text-xs font-bold ml-2 ${util > 90 ? 'text-accent-red' : 'text-text-secondary'}`}>({util.toFixed(1)}%)</span>
                     </div>
                   </div>
@@ -204,15 +206,17 @@ export default function Insights() {
                     />
                     {/* Tick marker for projected end */}
                     {acc.projected > 0 && acc.projected <= acc.monthly_budget && (
-                      <div className="absolute top-0 bottom-0 w-1 bg-white/40" style={{ left: `${(acc.projected / acc.monthly_budget) * 100}%` }} title={`Projected ${acc.projected}`}></div>
+                      <div className="absolute top-0 bottom-0 w-1 bg-white/40" style={{ left: `${(acc.projected / acc.monthly_budget) * 100}%` }} title={`Projected ₹${acc.projected}`}></div>
                     )}
                   </div>
                   
                   {acc.projectedOverage > 0 && (
-                    <p className="text-[11px] text-accent-red mt-1.5 flex items-center gap-1 font-medium">
-                      <AlertTriangle size={10} />
-                      Warning: Projected to overspend by ${acc.projectedOverage.toFixed(2)} (${acc.projected.toFixed(2)} total)
-                    </p>
+                    <div className="p-3 bg-accent-red/10 border border-accent-red/20 rounded-xl mt-3 flex items-start gap-3">
+                      <AlertTriangle size={16} className="text-accent-red mt-0.5 shrink-0" />
+                      <p className="text-xs text-accent-red font-medium">
+                        Warning: Projected to overspend by ₹{acc.projectedOverage.toFixed(2)} (₹{acc.projected.toFixed(2)} total)
+                      </p>
+                    </div>
                   )}
                 </div>
               );

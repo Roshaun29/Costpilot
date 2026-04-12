@@ -1,75 +1,53 @@
-from pydantic import BaseModel, EmailStr, Field, ConfigDict, GetJsonSchemaHandler
-from pydantic_core import core_schema
-from typing import Optional, Annotated, Any
+from sqlalchemy import String, Boolean, Integer, DateTime
+from sqlalchemy.orm import Mapped, mapped_column, relationship
 from datetime import datetime
-from bson import ObjectId
+from db.mysql import Base
+from .base import new_uuid
+from pydantic import BaseModel, EmailStr
+from typing import Optional
 
-# PyObjectId helper for MongoDB _id fields
-class PyObjectId(ObjectId):
-    @classmethod
-    def __get_pydantic_core_schema__(
-        cls, _source_type: Any, _handler: GetJsonSchemaHandler
-    ) -> core_schema.CoreSchema:
-        return core_schema.json_or_python_schema(
-            json_schema=core_schema.str_schema(),
-            python_schema=core_schema.union_schema([
-                core_schema.is_instance_schema(ObjectId),
-                core_schema.chain_schema([
-                    core_schema.str_schema(),
-                    core_schema.no_info_plain_validator_function(cls.validate),
-                ])
-            ]),
-            serialization=core_schema.plain_serializer_function_ser_schema(str),
-        )
+class User(Base):
+    __tablename__ = "users"
+    __table_args__ = {"extend_existing": True}
+    
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=new_uuid)
+    email: Mapped[str] = mapped_column(String(255), unique=True, nullable=False)
+    hashed_password: Mapped[str] = mapped_column(String(255), nullable=False)
+    full_name: Mapped[str] = mapped_column(String(255), nullable=False)
+    phone_number: Mapped[Optional[str]] = mapped_column(String(20), nullable=True)
+    notif_email: Mapped[bool] = mapped_column(Boolean, default=True)
+    notif_sms: Mapped[bool] = mapped_column(Boolean, default=True)
+    notif_in_app: Mapped[bool] = mapped_column(Boolean, default=True)
+    alert_threshold_percent: Mapped[int] = mapped_column(Integer, default=25)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+    updated_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
 
-    @classmethod
-    def validate(cls, v: Any) -> ObjectId:
-        if not ObjectId.is_valid(v):
-            raise ValueError("Invalid ObjectId")
-        return ObjectId(v)
-
-class NotificationPrefs(BaseModel):
-    email: bool = True
-    sms: bool = True
-    in_app: bool = True
-
-class UserBase(BaseModel):
+# Pydantic schemas
+class UserCreate(BaseModel):
     email: EmailStr
-    full_name: str
-    phone_number: Optional[str] = None
-    notification_prefs: NotificationPrefs = Field(default_factory=NotificationPrefs)
-    alert_threshold_percent: int = 25
-
-class UserCreate(UserBase):
     password: str
+    full_name: str
 
 class UserLogin(BaseModel):
     email: EmailStr
     password: str
 
+class UserResponse(BaseModel):
+    id: str
+    email: str
+    full_name: str
+    phone_number: Optional[str]
+    notif_email: bool
+    notif_sms: bool
+    notif_in_app: bool
+    alert_threshold_percent: int
+    created_at: datetime
+    model_config = {"from_attributes": True}
+
 class UserUpdate(BaseModel):
     full_name: Optional[str] = None
-    notification_prefs: Optional[NotificationPrefs] = None
+    phone_number: Optional[str] = None
+    notif_email: Optional[bool] = None
+    notif_sms: Optional[bool] = None
+    notif_in_app: Optional[bool] = None
     alert_threshold_percent: Optional[int] = None
-
-class UserResponse(UserBase):
-    id: Annotated[PyObjectId, Field(alias="_id", default_factory=PyObjectId)]
-    created_at: datetime
-    updated_at: datetime
-
-    model_config = ConfigDict(
-        arbitrary_types_allowed=True,
-        populate_by_name=True,
-        json_encoders={ObjectId: str}
-    )
-
-class UserInDB(UserBase):
-    id: Annotated[PyObjectId, Field(alias="_id", default_factory=PyObjectId)]
-    hashed_password: str
-    created_at: datetime = Field(default_factory=datetime.utcnow)
-    updated_at: datetime = Field(default_factory=datetime.utcnow)
-
-    model_config = ConfigDict(
-        arbitrary_types_allowed=True,
-        populate_by_name=True
-    )
